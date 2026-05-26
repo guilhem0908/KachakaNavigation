@@ -1,0 +1,26 @@
+FROM ros:humble-ros-base
+
+SHELL ["/bin/bash", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /workspace/KachakaNavigation
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-opencv \
+    ros-humble-cv-bridge \
+    ros-humble-sensor-msgs \
+    ros-humble-std-msgs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY docs ./docs
+COPY src ./src
+COPY tests ./tests
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir -e ".[dev]"
+
+ENV PYTHONPATH=/workspace/KachakaNavigation/src
+
+CMD ["bash"]

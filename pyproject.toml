@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kachaka-navigation"
+version = "0.1.0"
+description = "Python project for controlling a Kachaka robot through kachaka-api."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "kachaka-api",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+kachaka-nav-server = "kachaka_navigation.scripts.run_navigation_server:main"
+kachaka-robot-nav-client = "kachaka_navigation.scripts.run_robot_navigation_client:main"
+kachaka-ros-nav-server = "kachaka_navigation.scripts.run_ros_navigation_server:main"
+kachaka-ros2-command-executor = "kachaka_navigation.scripts.run_ros2_kachaka_command_executor:main"
+kachaka-ros2-command-sender = "kachaka_navigation.scripts.run_ros2_command_sender:main"
+kachaka-ros2-image-sender = "kachaka_navigation.scripts.run_ros2_image_sender:main"
+kachaka-ros2-trajectory-generator = "kachaka_navigation.scripts.run_ros2_trajectory_generator:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,20 @@
+services:
+  ros2:
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2
+    network_mode: host
+    working_dir: /workspace/KachakaNavigation
+    environment:
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      KACHAKA_HOST: ${KACHAKA_HOST:-}
+      KACHAKA_PORT: ${KACHAKA_PORT:-26400}
+      ROS2_CAMERA_INPUT_TOPIC: ${ROS2_CAMERA_INPUT_TOPIC:-/camera/image_raw}
+      ROS2_IMAGE_TOPIC: ${ROS2_IMAGE_TOPIC:-/kachaka_navigation/image}
+      ROS2_IMAGE_TYPE: ${ROS2_IMAGE_TYPE:-raw}
+      ROS2_TRAJECTORY_TOPIC: ${ROS2_TRAJECTORY_TOPIC:-/kachaka_navigation/trajectory}
+      ROS2_ROBOT_COMMAND_TOPIC: ${ROS2_ROBOT_COMMAND_TOPIC:-/kachaka_navigation/robot_command}
+      MAX_IMAGE_AGE_SECONDS: ${MAX_IMAGE_AGE_SECONDS:-0.5}
+    volumes:
+      - .:/workspace/KachakaNavigation
+    command: bash
