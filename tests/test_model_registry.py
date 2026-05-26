@@ -1,8 +1,15 @@
-from kachaka_navigation.models import NoopNavigationModel, build_default_registry
+from kachaka_navigation.models import (
+    ConstantVelocityModel,
+    NoopNavigationModel,
+    build_default_registry,
+)
 
 
-def test_default_registry_contains_noop_model() -> None:
+def test_default_registry_contains_builtin_models() -> None:
     registry = build_default_registry()
 
-    assert registry.names() == (NoopNavigationModel.name,)
+    assert registry.names() == (
+        ConstantVelocityModel.name,
+        NoopNavigationModel.name,
+    )
     assert registry.create("noop").name == "noop"

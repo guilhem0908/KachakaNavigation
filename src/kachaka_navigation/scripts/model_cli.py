@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from kachaka_navigation.models import (
+    ConstantVelocityConfig,
     NomadOriginalConfig,
     NomadOriginalModel,
     build_default_registry,
@@ -30,10 +31,16 @@ def add_navigation_model_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--context-size", type=int, default=5)
+    parser.add_argument("--constant-linear-x", type=float, default=0.05)
+    parser.add_argument("--constant-angular-z", type=float, default=0.0)
+    parser.add_argument("--constant-duration", type=float, default=0.2)
 
 
 def build_navigation_service_from_args(args: argparse.Namespace) -> NavigationService:
-    registry = build_default_registry(_nomad_config_from_args(args))
+    registry = build_default_registry(
+        nomad_config=_nomad_config_from_args(args),
+        constant_velocity_config=_constant_velocity_config_from_args(args),
+    )
     return NavigationService(model=registry.create(args.model))
 
 
@@ -49,4 +56,14 @@ def _nomad_config_from_args(args: argparse.Namespace) -> NomadOriginalConfig | N
         goal_image_path=args.nomad_goal_image,
         device=args.device,
         context_size=args.context_size,
+    )
+
+
+def _constant_velocity_config_from_args(
+    args: argparse.Namespace,
+) -> ConstantVelocityConfig | None:
+    return ConstantVelocityConfig(
+        linear_x=args.constant_linear_x,
+        angular_z=args.constant_angular_z,
+        duration_seconds=args.constant_duration,
     )

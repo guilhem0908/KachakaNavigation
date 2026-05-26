@@ -1,3 +1,7 @@
+from kachaka_navigation.models.constant_velocity import (
+    ConstantVelocityConfig,
+    ConstantVelocityModel,
+)
 from kachaka_navigation.models.nomad_original import (
     NomadOriginalConfig,
     NomadOriginalModel,
@@ -9,6 +13,8 @@ from kachaka_navigation.models.registry import (
 )
 
 __all__ = [
+    "ConstantVelocityConfig",
+    "ConstantVelocityModel",
     "NavigationModelRegistry",
     "NomadOriginalConfig",
     "NomadOriginalModel",

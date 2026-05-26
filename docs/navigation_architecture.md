@@ -125,6 +125,9 @@ Les modèles ne doivent pas appeler directement l'API Kachaka. Ils renvoient
 uniquement un `NavigationCommand`. C'est ce qui permet de remplacer NoMaD par
 un autre modèle sans réécrire le client robot.
 
+Le tutoriel complet pour brancher un modèle est dans
+[docs/model_integration.md](model_integration.md).
+
 ## NoMaD original
 
 `NomadOriginalModel` est volontairement un adaptateur fin. Il garde déjà une
@@ -141,9 +144,9 @@ Prochaine étape d'intégration:
 5. Ajouter un exécuteur Kachaka capable d'appliquer un waypoint ou une vitesse.
 
 Pour l'instant, `KachakaCommandExecutor` applique les commandes haut niveau
-déjà disponibles dans `KachakaRobotClient`. Les commandes `velocity` et
-`waypoint` lèvent une erreur explicite tant que le pont `cmd_vel` ou waypoint
-Kachaka n'est pas ajouté.
+déjà disponibles dans `KachakaRobotClient`. Les commandes `velocity` sont
+exécutables via le pont ROS2 `cmd_vel` du noeud `kachaka_command_executor`.
+Les commandes `waypoint` restent à câbler.
 
 ## Commandes utiles
 

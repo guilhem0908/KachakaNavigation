@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-opencv \
     ros-humble-cv-bridge \
+    ros-humble-geometry-msgs \
     ros-humble-sensor-msgs \
     ros-humble-std-msgs \
     && rm -rf /var/lib/apt/lists/*

@@ -22,7 +22,12 @@ DEFAULT_ROS2_IMAGE_TOPIC = "/kachaka_navigation/image"
 DEFAULT_ROS2_IMAGE_TYPE = "raw"
 DEFAULT_ROS2_ROBOT_COMMAND_TOPIC = "/kachaka_navigation/robot_command"
 DEFAULT_ROS2_TRAJECTORY_TOPIC = "/kachaka_navigation/trajectory"
+DEFAULT_ROS2_CMD_VEL_TOPIC = "/kachaka/manual_control/cmd_vel"
 DEFAULT_MAX_IMAGE_AGE_SECONDS = 0.5
+DEFAULT_CMD_VEL_PUBLISH_RATE_HZ = 20.0
+DEFAULT_VELOCITY_COMMAND_TIMEOUT_SECONDS = 0.25
+DEFAULT_MAX_LINEAR_SPEED_MPS = 0.2
+DEFAULT_MAX_ANGULAR_SPEED_RADPS = 0.5
 
 
 @dataclass(frozen=True)
@@ -47,7 +52,12 @@ class NavigationSettings:
     ros2_image_type: str
     ros2_trajectory_topic: str
     ros2_robot_command_topic: str
+    ros2_cmd_vel_topic: str
     max_image_age_seconds: float
+    cmd_vel_publish_rate_hz: float
+    velocity_command_timeout_seconds: float
+    max_linear_speed_mps: float
+    max_angular_speed_radps: float
 
 
 def get_kachaka_settings() -> KachakaSettings:
@@ -95,9 +105,29 @@ def get_navigation_settings() -> NavigationSettings:
             "ROS2_ROBOT_COMMAND_TOPIC",
             DEFAULT_ROS2_ROBOT_COMMAND_TOPIC,
         ),
+        ros2_cmd_vel_topic=_get_str_env(
+            "ROS2_CMD_VEL_TOPIC",
+            DEFAULT_ROS2_CMD_VEL_TOPIC,
+        ),
         max_image_age_seconds=_get_float_env(
             "MAX_IMAGE_AGE_SECONDS",
             DEFAULT_MAX_IMAGE_AGE_SECONDS,
+        ),
+        cmd_vel_publish_rate_hz=_get_float_env(
+            "CMD_VEL_PUBLISH_RATE_HZ",
+            DEFAULT_CMD_VEL_PUBLISH_RATE_HZ,
+        ),
+        velocity_command_timeout_seconds=_get_float_env(
+            "VELOCITY_COMMAND_TIMEOUT_SECONDS",
+            DEFAULT_VELOCITY_COMMAND_TIMEOUT_SECONDS,
+        ),
+        max_linear_speed_mps=_get_float_env(
+            "MAX_LINEAR_SPEED_MPS",
+            DEFAULT_MAX_LINEAR_SPEED_MPS,
+        ),
+        max_angular_speed_radps=_get_float_env(
+            "MAX_ANGULAR_SPEED_RADPS",
+            DEFAULT_MAX_ANGULAR_SPEED_RADPS,
         ),
     )
 

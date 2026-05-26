@@ -14,7 +14,12 @@ services:
       ROS2_IMAGE_TYPE: ${ROS2_IMAGE_TYPE:-raw}
       ROS2_TRAJECTORY_TOPIC: ${ROS2_TRAJECTORY_TOPIC:-/kachaka_navigation/trajectory}
       ROS2_ROBOT_COMMAND_TOPIC: ${ROS2_ROBOT_COMMAND_TOPIC:-/kachaka_navigation/robot_command}
+      ROS2_CMD_VEL_TOPIC: ${ROS2_CMD_VEL_TOPIC:-/kachaka/manual_control/cmd_vel}
       MAX_IMAGE_AGE_SECONDS: ${MAX_IMAGE_AGE_SECONDS:-0.5}
+      CMD_VEL_PUBLISH_RATE_HZ: ${CMD_VEL_PUBLISH_RATE_HZ:-20.0}
+      VELOCITY_COMMAND_TIMEOUT_SECONDS: ${VELOCITY_COMMAND_TIMEOUT_SECONDS:-0.25}
+      MAX_LINEAR_SPEED_MPS: ${MAX_LINEAR_SPEED_MPS:-0.2}
+      MAX_ANGULAR_SPEED_RADPS: ${MAX_ANGULAR_SPEED_RADPS:-0.5}
     volumes:
       - .:/workspace/KachakaNavigation
     command: bash

@@ -27,3 +27,15 @@ __MACOSX/
 
 # Logs
 *.log
+
+# Model assets
+models/**/checkpoints/*
+models/**/*.ckpt
+models/**/*.pth
+models/**/*.pt
+models/**/*.onnx
+models/**/*.safetensors
+models/**/*.bag
+models/**/*.db3
+!models/**/.gitkeep
+!models/**/README.md

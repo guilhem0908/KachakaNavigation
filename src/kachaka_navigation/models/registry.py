@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from kachaka_navigation.core.interfaces import NavigationModel
+from kachaka_navigation.models.constant_velocity import (
+    ConstantVelocityConfig,
+    ConstantVelocityModel,
+)
 from kachaka_navigation.models.nomad_original import (
     NomadOriginalConfig,
     NomadOriginalModel,
@@ -44,9 +48,14 @@ class NavigationModelRegistry:
 
 def build_default_registry(
     nomad_config: NomadOriginalConfig | None = None,
+    constant_velocity_config: ConstantVelocityConfig | None = None,
 ) -> NavigationModelRegistry:
     registry = NavigationModelRegistry()
     registry.register(NoopNavigationModel.name, NoopNavigationModel)
+    registry.register(
+        ConstantVelocityModel.name,
+        lambda: ConstantVelocityModel(config=constant_velocity_config),
+    )
 
     if nomad_config is not None:
         registry.register(

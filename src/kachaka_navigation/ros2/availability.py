@@ -20,6 +20,18 @@ def import_ros2_core() -> tuple[Any, type[Any], Any, type[Any], type[Any], type[
     return rclpy, Node, qos_profile_sensor_data, Image, CompressedImage, String
 
 
+def import_twist_message() -> type[Any]:
+    try:
+        from geometry_msgs.msg import Twist
+    except ImportError as exc:
+        raise RuntimeError(
+            "Low-level velocity control requires geometry_msgs/msg/Twist. "
+            "Install geometry_msgs or use the ROS2 Docker image."
+        ) from exc
+
+    return Twist
+
+
 def import_ros2_node_base() -> type[Any]:
     try:
         from rclpy.node import Node

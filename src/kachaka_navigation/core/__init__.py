@@ -16,6 +16,7 @@ from kachaka_navigation.core.realtime import (
     ImageFreshnessPolicy,
     ImageFreshnessStatus,
 )
+from kachaka_navigation.core.velocity_safety import VelocitySafetyLimits
 
 __all__ = [
     "CommandExecutor",
@@ -29,5 +30,6 @@ __all__ = [
     "NavigationModel",
     "RobotState",
     "VelocityCommand",
+    "VelocitySafetyLimits",
     "WaypointCommand",
 ]

@@ -25,6 +25,9 @@ python -m kachaka_navigation.scripts.run_ros2_image_sender
 python -m kachaka_navigation.scripts.run_ros2_kachaka_command_executor --dry-run
 ```
 
+Pour tester le chemin bas niveau `cmd_vel`, voir
+[docs/low_level_velocity.md](low_level_velocity.md).
+
 Sur Linux, `network_mode: host` simplifie la découverte ROS2. Sur macOS, Docker
 Desktop isole davantage le réseau: il peut être nécessaire d'exécuter ROS2
 directement sur la machine, ou d'utiliser une configuration réseau ROS2 dédiée.

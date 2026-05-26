@@ -1,79 +1,187 @@
-# KachakaNavigation - commandes terminal
+# KachakaNavigation
 
-## Initialisation
+KachakaNavigation est un projet de navigation visuelle pour tester plusieurs
+modèles de navigation sur un robot Kachaka avec ROS2.
 
-Ouvre le dossier du projet.
+Le principe général:
+
+```text
+topic camera
+  -> image_sender
+  -> trajectory_generator avec modèle interchangeable
+  -> command_sender
+  -> command_executor Kachaka
+```
+
+Le modèle par défaut est `noop`: il ne déplace pas le robot et sert à vérifier
+le câblage. L'adaptateur `nomad_original` prépare l'intégration du NoMaD
+original de `robodhruv/visualnav-transformer`.
+
+## Organisation
+
+```text
+KachakaNavigation/
+├── src/kachaka_navigation/
+│   ├── core/          # contrats input/output des modèles
+│   ├── models/        # adaptateurs Python des modèles
+│   ├── ros2/          # noeuds ROS2
+│   ├── robot/         # exécution des commandes Kachaka
+│   └── scripts/       # commandes lançables
+├── models/            # checkpoints, configs, images objectif
+├── docs/              # architecture et guides
+├── tests/
+├── Dockerfile.ros2
+└── docker-compose.yml
+```
+
+Séparation importante:
+
+- `src/kachaka_navigation/models/` contient le code Python des modèles.
+- `models/` contient les fichiers lourds: checkpoints, configs, goal images.
+
+## Installation
+
+Installation locale:
 
 ```bash
 cd ~/Desktop/KachakaNavigation
-```
-
-Active l'environnement Python.
-
-```bash
 conda activate kachaka-nav
-```
-
-Installe le projet en mode développement.
-
-```bash
 python -m pip install -e .
 ```
 
----
+Outils de développement:
 
-## Vérifications
+```bash
+python -m pip install -e ".[dev]"
+```
 
-Vérifie rapidement que le port API de Kachaka est joignable.
+Environnement ROS2 reproductible:
+
+```bash
+docker compose build ros2
+docker compose run --rm ros2
+```
+
+Voir [docs/ros2_docker.md](docs/ros2_docker.md).
+
+## Configuration
+
+Copier le fichier d'exemple:
+
+```bash
+cp .env.example .env
+```
+
+Configurer au minimum:
+
+```text
+KACHAKA_HOST=<adresse-ip-du-robot>
+KACHAKA_PORT=26400
+ROS2_CAMERA_INPUT_TOPIC=/camera/image_raw
+ROS2_IMAGE_TOPIC=/kachaka_navigation/image
+ROS2_TRAJECTORY_TOPIC=/kachaka_navigation/trajectory
+ROS2_ROBOT_COMMAND_TOPIC=/kachaka_navigation/robot_command
+ROS2_CMD_VEL_TOPIC=/kachaka/manual_control/cmd_vel
+MAX_IMAGE_AGE_SECONDS=0.5
+CMD_VEL_PUBLISH_RATE_HZ=20.0
+VELOCITY_COMMAND_TIMEOUT_SECONDS=0.25
+MAX_LINEAR_SPEED_MPS=0.2
+MAX_ANGULAR_SPEED_RADPS=0.5
+```
+
+Vérifier l'API Kachaka:
 
 ```bash
 python -m kachaka_navigation.scripts.check_api_connection
-```
-
-Teste la connexion API.
-
-```bash
 python -m kachaka_navigation.scripts.smoke_test_connection
 ```
 
-Liste les zones connues.
+## Où Mettre Les Modèles
 
-```bash
-python -m kachaka_navigation.scripts.list_locations
-```
+Les fichiers des modèles vont dans `models/`.
 
-Liste les étagères connues.
-
-```bash
-python -m kachaka_navigation.scripts.list_shelves
-```
-
----
-
-## Architecture navigation visuelle
-
-L'architecture ROS2 et client-serveur est décrite dans
-[docs/navigation_architecture.md](docs/navigation_architecture.md).
-
-Le principe recommandé pour Kachaka:
+Pour NoMaD:
 
 ```text
-camera -> image_sender -> trajectory_generator -> command_sender -> command_executor
+models/nomad_original/
+├── checkpoints/
+│   └── nomad.ckpt
+├── configs/
+│   └── nomad.yaml
+└── goals/
+    └── goal.jpg
 ```
 
-Côté serveur, lancer le noeud qui génère les trajectoires.
+Les checkpoints et gros fichiers sont ignorés par Git. Il faut seulement
+commiter les README et placeholders.
+
+Voir [models/README.md](models/README.md).
+
+## Contrat D'un Modèle
+
+Chaque modèle reçoit un objet:
+
+```python
+ImageFrame
+```
+
+Champs principaux:
+
+```text
+data       bytes de l'image, souvent JPEG
+encoding   jpeg, raw, png, ou format compressé
+width      largeur optionnelle
+height     hauteur optionnelle
+frame_id   frame ROS si disponible
+timestamp  timestamp image en secondes
+metadata   topic source, temps de réception, infos additionnelles
+```
+
+Chaque modèle retourne:
+
+```python
+NavigationCommand
+```
+
+Types de commandes prévus:
+
+```text
+stop
+noop
+velocity
+waypoint
+move_to_location
+return_home
+dock_shelf
+undock_shelf
+cancel
+speak
+```
+
+L'exécuteur Kachaka applique les commandes haut niveau via l'API Kachaka.
+Les commandes `velocity` sont supportées via ROS2 `geometry_msgs/Twist` quand
+`--enable-velocity-control` est activé. Les commandes `waypoint` restent à
+câbler.
+
+Guide complet: [docs/model_integration.md](docs/model_integration.md).
+
+## Lancer Le Modèle Sûr
+
+Commencer avec `noop`. Il valide le flux ROS2 sans bouger le robot.
+
+Terminal 1, génération des trajectoires:
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_trajectory_generator --model noop
 ```
 
-Côté serveur, lancer le noeud qui envoie les commandes vers Kachaka.
+Terminal 2, envoi des commandes:
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_command_sender
 ```
 
-Côté caméra/Kachaka, relayer une caméra quelconque vers le topic attendu.
+Terminal 3, relais caméra:
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_image_sender \
@@ -81,235 +189,111 @@ python -m kachaka_navigation.scripts.run_ros2_image_sender \
   --output-image-topic /kachaka_navigation/image
 ```
 
-Côté Kachaka, exécuter les commandes. Commencer en dry-run.
+Terminal 4, exécution Kachaka en dry-run:
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_kachaka_command_executor --dry-run
 ```
 
-Pour un environnement ROS2 reproductible, voir
-[docs/ros2_docker.md](docs/ros2_docker.md).
+Vérifier que les images arrivent en temps réel:
 
----
+```bash
+ros2 topic hz /kachaka_navigation/image
+ros2 topic echo /kachaka_navigation/robot_command
+```
 
-## Zones connues
+## Tester Une Commande Bas Niveau
+
+Le modèle intégré `constant_velocity` produit une petite commande `velocity`.
+Il sert à valider le chemin bas niveau avant NoMaD.
+
+Générateur:
+
+```bash
+python -m kachaka_navigation.scripts.run_ros2_trajectory_generator \
+  --model constant_velocity \
+  --constant-linear-x 0.03 \
+  --constant-angular-z 0.0 \
+  --constant-duration 0.2
+```
+
+Exécuteur en dry-run:
+
+```bash
+python -m kachaka_navigation.scripts.run_ros2_kachaka_command_executor \
+  --dry-run \
+  --enable-velocity-control
+```
+
+Exécuteur avec publication `cmd_vel`, après vérification du topic Kachaka:
+
+```bash
+python -m kachaka_navigation.scripts.run_ros2_kachaka_command_executor \
+  --enable-velocity-control \
+  --disable-kachaka-api \
+  --cmd-vel-topic /kachaka/manual_control/cmd_vel
+```
+
+Voir [docs/low_level_velocity.md](docs/low_level_velocity.md).
+
+## Lancer NoMaD Original
+
+Placer les assets:
 
 ```text
-home      = dock de charge
-S01_home  = zone de la grande étagère
-S02_home  = zone de la petite étagère
-L02       = zone de dépôt commune / 受付
+models/nomad_original/checkpoints/nomad.ckpt
+models/nomad_original/configs/nomad.yaml
+models/nomad_original/goals/goal.jpg
 ```
 
-Coordonnées de `L02` :
-
-```text
-x     = 5.6937123263245724
-y     = 0.79818810199356616
-theta = 1.6002418814260775
-```
-
----
-
-## Étagères connues
-
-```text
-S01 = grande étagère / シェルフ / home_location_id S01_home
-S02 = petite étagère / 本棚 / home_location_id S02_home
-```
-
----
-
-## Aller à une zone
-
-Retourne au dock de charge.
+Lancer le générateur de trajectoires:
 
 ```bash
-python -m kachaka_navigation.scripts.return_home
+python -m kachaka_navigation.scripts.run_ros2_trajectory_generator \
+  --model nomad_original \
+  --nomad-checkpoint models/nomad_original/checkpoints/nomad.ckpt \
+  --nomad-config models/nomad_original/configs/nomad.yaml \
+  --nomad-goal-image models/nomad_original/goals/goal.jpg
 ```
 
-Va au dock de charge.
+État actuel: l'adaptateur NoMaD existe comme point d'intégration propre, mais
+le chargement PyTorch/checkpoint et le preprocessing VisualNav Transformer ne
+sont pas encore câblés.
+
+## Ajouter Un Nouveau Modèle
+
+1. Créer un adaptateur dans `src/kachaka_navigation/models/`.
+2. Implémenter l'interface `NavigationModel`.
+
+```python
+class MyModel:
+    name = "my_model"
+
+    def reset(self) -> None:
+        ...
+
+    def predict(
+        self,
+        frame: ImageFrame,
+        state: RobotState | None = None,
+    ) -> NavigationCommand:
+        ...
+```
+
+3. L'enregistrer dans `src/kachaka_navigation/models/registry.py`.
+4. Placer les poids/configs dans `models/my_model/`.
+5. Le lancer avec:
 
 ```bash
-python -m kachaka_navigation.scripts.move_to_location home
+python -m kachaka_navigation.scripts.run_ros2_trajectory_generator --model my_model
 ```
 
-Va à la zone de la grande étagère.
+Tutoriel détaillé: [docs/model_integration.md](docs/model_integration.md).
 
-```bash
-python -m kachaka_navigation.scripts.move_to_location S01_home
-```
+## Documentation
 
-Va à la zone de la petite étagère.
-
-```bash
-python -m kachaka_navigation.scripts.move_to_location S02_home
-```
-
-Va à la zone de dépôt commune.
-
-```bash
-python -m kachaka_navigation.scripts.move_to_location L02
-```
-
----
-
-## Charger / prendre une étagère dans une zone
-
-Va à `home` et prend l'étagère devant le robot.
-
-```bash
-python -m kachaka_navigation.scripts.dock_any_shelf_at_home
-```
-
-Équivalent avec la commande générique.
-
-```bash
-python -m kachaka_navigation.scripts.dock_any_shelf_at_location home
-```
-
-Va à `S01_home` et prend l'étagère devant le robot.
-
-```bash
-python -m kachaka_navigation.scripts.dock_any_shelf_at_location S01_home
-```
-
-Va à `S02_home` et prend l'étagère devant le robot.
-
-```bash
-python -m kachaka_navigation.scripts.dock_any_shelf_at_location S02_home
-```
-
-Va à `L02` et prend l'étagère devant le robot.
-
-```bash
-python -m kachaka_navigation.scripts.dock_any_shelf_at_location L02
-```
-
----
-
-## Décharger / déposer une étagère dans une zone
-
-Va à `home` et dépose l'étagère transportée.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf_at_home
-```
-
-Équivalent avec la commande générique.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf_at_location home
-```
-
-Va à `S01_home` et dépose l'étagère transportée.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf_at_location S01_home
-```
-
-Va à `S02_home` et dépose l'étagère transportée.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf_at_location S02_home
-```
-
-Va à `L02` et dépose l'étagère transportée.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf_at_location L02
-```
-
----
-
-## Charger / décharger à la position actuelle
-
-Prend l'étagère située devant le robot.
-
-```bash
-python -m kachaka_navigation.scripts.dock_shelf
-```
-
-Dépose l'étagère à la position actuelle.
-
-```bash
-python -m kachaka_navigation.scripts.undock_shelf
-```
-
----
-
-## Déplacer automatiquement une étagère vers une zone
-
-Déplace la grande étagère `S01` vers `home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S01 home
-```
-
-Déplace la grande étagère `S01` vers `S01_home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S01 S01_home
-```
-
-Déplace la grande étagère `S01` vers `S02_home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S01 S02_home
-```
-
-Déplace la grande étagère `S01` vers `L02`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S01 L02
-```
-
-Déplace la petite étagère `S02` vers `home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S02 home
-```
-
-Déplace la petite étagère `S02` vers `S01_home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S02 S01_home
-```
-
-Déplace la petite étagère `S02` vers `S02_home`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S02 S02_home
-```
-
-Déplace la petite étagère `S02` vers `L02`, puis la dépose.
-
-```bash
-python -m kachaka_navigation.scripts.move_shelf S02 L02
-```
-
----
-
-## Ramener une étagère à sa zone enregistrée
-
-Ramène la grande étagère `S01` à sa position enregistrée.
-
-```bash
-python -m kachaka_navigation.scripts.return_shelf S01
-```
-
-Ramène la petite étagère `S02` à sa position enregistrée.
-
-```bash
-python -m kachaka_navigation.scripts.return_shelf S02
-```
-
----
-
-## Stop
-
-Annule la commande en cours.
-
-```bash
-python -m kachaka_navigation.scripts.cancel_command
-```
+- [Architecture ROS2](docs/navigation_architecture.md)
+- [Guide d'intégration des modèles](docs/model_integration.md)
+- [Commandes bas niveau cmd_vel](docs/low_level_velocity.md)
+- [Docker ROS2](docs/ros2_docker.md)
+- [Commandes directes Kachaka](docs/kachaka_api_commands.md)
