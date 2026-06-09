@@ -30,7 +30,7 @@ def add_navigation_model_arguments(parser: argparse.ArgumentParser) -> None:
         help="Goal image used by the NoMaD adapter.",
     )
     parser.add_argument("--device", default="cpu")
-    parser.add_argument("--context-size", type=int, default=5)
+    parser.add_argument("--context-size", type=int, default=3)
     parser.add_argument("--constant-linear-x", type=float, default=0.05)
     parser.add_argument("--constant-angular-z", type=float, default=0.0)
     parser.add_argument("--constant-duration", type=float, default=0.2)

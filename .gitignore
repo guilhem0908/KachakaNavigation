@@ -39,3 +39,9 @@ models/**/*.bag
 models/**/*.db3
 !models/**/.gitkeep
 !models/**/README.md
+
+# Vendored upstream model code (recreated by scripts/setup_nomad.sh)
+third_party/
+
+# Local experiment scratch files
+scratch_*.py

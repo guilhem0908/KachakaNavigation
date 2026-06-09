@@ -202,38 +202,47 @@ src/kachaka_navigation/scripts/model_cli.py
 
 ## NoMaD Original
 
-NoMaD doit suivre le même contrat:
+NoMaD suit le même contrat:
 
 ```text
-ImageFrame -> NomadOriginalModel.predict(...) -> NavigationCommand
+ImageFrame -> NomadOriginalModel.predict(...) -> NavigationCommand (velocity)
 ```
 
-Assets attendus:
+L'adaptateur est **câblé** (`src/kachaka_navigation/models/nomad_original.py`):
+
+1. charge le code modèle VisualNav Transformer + `diffusion_policy` (vendorisés
+   sous `third_party/` par `scripts/setup_nomad.sh`) ;
+2. charge la config `nomad.yaml` et le checkpoint `nomad.pth` ;
+3. applique le preprocessing image original (resize + normalisation ImageNet,
+   file de contexte) ;
+4. exécute l'encodeur vision + l'échantillonnage par diffusion (`DDPMScheduler`),
+   puis `get_action` pour obtenir des waypoints ;
+5. convertit le waypoint choisi en `velocity` via un contrôleur PD, borné par les
+   limites de vitesse.
+
+Assets (créés par `scripts/setup_nomad.sh`):
 
 ```text
-models/nomad_original/checkpoints/nomad.ckpt
+models/nomad_original/checkpoints/nomad.pth
 models/nomad_original/configs/nomad.yaml
-models/nomad_original/goals/goal.jpg
+models/nomad_original/goals/goal.jpg   # optionnel (mode objectif)
 ```
 
-Commande:
+Pilotage direct sur ce PC (sans ROS), voir
+[docs/nomad_kachaka.md](nomad_kachaka.md):
+
+```bash
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control --dry-run --max-iterations 20
+```
+
+Via ROS2 (le `velocity` est exécuté par l'exécuteur `cmd_vel`):
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_trajectory_generator \
   --model nomad_original \
-  --nomad-checkpoint models/nomad_original/checkpoints/nomad.ckpt \
-  --nomad-config models/nomad_original/configs/nomad.yaml \
-  --nomad-goal-image models/nomad_original/goals/goal.jpg
+  --nomad-checkpoint models/nomad_original/checkpoints/nomad.pth \
+  --nomad-config models/nomad_original/configs/nomad.yaml
 ```
-
-À câbler ensuite:
-
-1. Charger le repo ou package VisualNav Transformer.
-2. Charger la config et le checkpoint NoMaD.
-3. Appliquer le preprocessing image original.
-4. Convertir la sortie modèle en waypoint ou vitesse.
-5. Pour `velocity`, utiliser l'exécuteur `cmd_vel` déjà disponible.
-6. Pour `waypoint`, ajouter un pont Kachaka/ROS2 dédié.
 
 ## Modèle De Test `constant_velocity`
 

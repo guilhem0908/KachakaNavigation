@@ -18,6 +18,16 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5",
 ]
+nomad = [
+    "torch",
+    "torchvision",
+    "diffusers",
+    "efficientnet_pytorch",
+    "pillow",
+    "pyyaml",
+    "einops",
+    "gdown",
+]
 
 [project.scripts]
 kachaka-nav-server = "kachaka_navigation.scripts.run_navigation_server:main"
@@ -27,6 +37,7 @@ kachaka-ros2-command-executor = "kachaka_navigation.scripts.run_ros2_kachaka_com
 kachaka-ros2-command-sender = "kachaka_navigation.scripts.run_ros2_command_sender:main"
 kachaka-ros2-image-sender = "kachaka_navigation.scripts.run_ros2_image_sender:main"
 kachaka-ros2-trajectory-generator = "kachaka_navigation.scripts.run_ros2_trajectory_generator:main"
+kachaka-nomad-control = "kachaka_navigation.scripts.run_nomad_kachaka_control:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -5,7 +5,7 @@ from grpc import RpcError, StatusCode
 from kachaka_api import KachakaApiClient
 
 from kachaka_navigation.connectivity import ensure_tcp_connection
-
+from kachaka_navigation.core.messages import ImageFrame
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,37 @@ class KachakaRobotClient:
     def speak(self, text: str) -> Any:
         logger.info("Sending speak command")
         return self._client.speak(text)
+
+    def get_front_camera_frame(self) -> ImageFrame:
+        """Return the latest front-camera image as a (JPEG) ImageFrame."""
+        compressed = self._client.get_front_camera_ros_compressed_image()
+        encoding = compressed.format or "jpeg"
+        if "jpeg" in encoding.lower() or "jpg" in encoding.lower():
+            encoding = "jpeg"
+        elif "png" in encoding.lower():
+            encoding = "png"
+        timestamp: float | None = None
+        stamp = getattr(getattr(compressed, "header", None), "stamp", None)
+        if stamp is not None:
+            timestamp = float(stamp.sec) + float(stamp.nanosec) / 1_000_000_000.0
+        return ImageFrame(
+            data=bytes(compressed.data),
+            encoding=encoding,
+            frame_id=getattr(getattr(compressed, "header", None), "frame_id", "") or "",
+            timestamp=timestamp,
+            metadata={"source": "kachaka_front_camera"},
+        )
+
+    def set_manual_control_enabled(self, enable: bool) -> Any:
+        logger.info("Setting Kachaka manual control: %s", enable)
+        return self._client.set_manual_control_enabled(enable)
+
+    def set_velocity(self, linear: float, angular: float) -> Any:
+        logger.debug("Setting robot velocity linear=%.3f angular=%.3f", linear, angular)
+        return self._client.set_robot_velocity(linear=linear, angular=angular)
+
+    def stop_velocity(self) -> Any:
+        return self.set_velocity(0.0, 0.0)
 
     def move_to_location(self, location_id_or_name: str) -> Any:
         logger.info("Moving to location: %s", location_id_or_name)

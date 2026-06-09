@@ -14,8 +14,9 @@ topic camera
 ```
 
 Le modèle par défaut est `noop`: il ne déplace pas le robot et sert à vérifier
-le câblage. L'adaptateur `nomad_original` prépare l'intégration du NoMaD
-original de `robodhruv/visualnav-transformer`.
+le câblage. L'adaptateur `nomad_original` intègre le NoMaD original de
+`robodhruv/visualnav-transformer` et permet de piloter le Kachaka en natif sur
+ce PC (voir [docs/nomad_kachaka.md](docs/nomad_kachaka.md)).
 
 ## Organisation
 
@@ -100,16 +101,16 @@ python -m kachaka_navigation.scripts.smoke_test_connection
 
 Les fichiers des modèles vont dans `models/`.
 
-Pour NoMaD:
+Pour NoMaD (créés par `./scripts/setup_nomad.sh`):
 
 ```text
 models/nomad_original/
 ├── checkpoints/
-│   └── nomad.ckpt
+│   └── nomad.pth
 ├── configs/
 │   └── nomad.yaml
 └── goals/
-    └── goal.jpg
+    └── goal.jpg   # optionnel (mode objectif)
 ```
 
 Les checkpoints et gros fichiers sont ignorés par Git. Il faut seulement
@@ -236,29 +237,46 @@ python -m kachaka_navigation.scripts.run_ros2_kachaka_command_executor \
 
 Voir [docs/low_level_velocity.md](docs/low_level_velocity.md).
 
-## Lancer NoMaD Original
+## Piloter Le Kachaka Avec NoMaD (Sur Ce PC, Sans ROS)
 
-Placer les assets:
+L'adaptateur `nomad_original` charge le vrai checkpoint NoMaD
+(`robodhruv/visualnav-transformer`) et le branche sur le contrat
+`ImageFrame -> NavigationCommand`. Sur ce Mac, on pilote le robot en natif via
+`kachaka-api` (caméra avant -> NoMaD -> vitesse), **sans ROS**.
 
-```text
-models/nomad_original/checkpoints/nomad.ckpt
-models/nomad_original/configs/nomad.yaml
-models/nomad_original/goals/goal.jpg
+Installation (une fois):
+
+```bash
+conda activate kachaka-nav
+./scripts/setup_nomad.sh
 ```
 
-Lancer le générateur de trajectoires:
+Dry-run (le robot ne bouge pas, on journalise seulement les vitesses):
+
+```bash
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --dry-run --max-iterations 20
+```
+
+Pilotage réel (le robot bouge — dégager la zone, `Ctrl-C` pour arrêter):
+
+```bash
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --max-linear-speed 0.1 --max-angular-speed 0.3 --frame-rate 3
+```
+
+Guide complet: [docs/nomad_kachaka.md](docs/nomad_kachaka.md).
+
+### NoMaD via ROS2 (optionnel)
+
+L'adaptateur fonctionne aussi avec le générateur de trajectoires ROS2:
 
 ```bash
 python -m kachaka_navigation.scripts.run_ros2_trajectory_generator \
   --model nomad_original \
-  --nomad-checkpoint models/nomad_original/checkpoints/nomad.ckpt \
-  --nomad-config models/nomad_original/configs/nomad.yaml \
-  --nomad-goal-image models/nomad_original/goals/goal.jpg
+  --nomad-checkpoint models/nomad_original/checkpoints/nomad.pth \
+  --nomad-config models/nomad_original/configs/nomad.yaml
 ```
-
-État actuel: l'adaptateur NoMaD existe comme point d'intégration propre, mais
-le chargement PyTorch/checkpoint et le preprocessing VisualNav Transformer ne
-sont pas encore câblés.
 
 ## Ajouter Un Nouveau Modèle
 
@@ -292,6 +310,7 @@ Tutoriel détaillé: [docs/model_integration.md](docs/model_integration.md).
 
 ## Documentation
 
+- [Piloter le Kachaka avec NoMaD](docs/nomad_kachaka.md)
 - [Architecture ROS2](docs/navigation_architecture.md)
 - [Guide d'intégration des modèles](docs/model_integration.md)
 - [Commandes bas niveau cmd_vel](docs/low_level_velocity.md)

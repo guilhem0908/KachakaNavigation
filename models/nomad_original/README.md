@@ -1,28 +1,42 @@
 # Assets NoMaD Original
 
-Placer ici les fichiers NoMaD originaux quand ils sont disponibles.
+Ces fichiers sont récupérés automatiquement par `./scripts/setup_nomad.sh`
+(ignorés par Git, sauf ce README et les `.gitkeep`).
 
 Structure attendue:
 
 ```text
 models/nomad_original/
 ├── checkpoints/
-│   └── nomad.ckpt
+│   └── nomad.pth      # checkpoint publié (~73 Mo, Google Drive)
 ├── configs/
-│   └── nomad.yaml
+│   └── nomad.yaml     # config d'entraînement (copiée depuis le repo upstream)
 └── goals/
-    └── goal.jpg
+    └── goal.jpg       # optionnel: image objectif (mode goal-conditioned)
 ```
 
-Commande exemple:
+L'adaptateur `nomad_original` charge ce checkpoint, exécute l'encodeur vision +
+l'échantillonnage par diffusion, puis convertit le waypoint prédit en commande
+`velocity` (contrôleur PD).
+
+## Pilotage direct sur ce PC (sans ROS)
 
 ```bash
-python -m kachaka_navigation.scripts.run_ros2_trajectory_generator \
-  --model nomad_original \
-  --nomad-checkpoint models/nomad_original/checkpoints/nomad.ckpt \
-  --nomad-config models/nomad_original/configs/nomad.yaml \
-  --nomad-goal-image models/nomad_original/goals/goal.jpg
+# 1) installation (une fois)
+./scripts/setup_nomad.sh
+
+# 2) dry-run, le robot ne bouge pas
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control --dry-run --max-iterations 20
+
+# 3) pilotage réel (le robot bouge)
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --max-linear-speed 0.1 --max-angular-speed 0.3 --frame-rate 3
 ```
 
-L'adaptateur actuel réserve le point d'intégration, mais ne charge pas encore le
-checkpoint PyTorch du VisualNav Transformer.
+Guide complet: [docs/nomad_kachaka.md](../../docs/nomad_kachaka.md).
+
+## Provenance
+
+- Code modèle: [robodhruv/visualnav-transformer](https://github.com/robodhruv/visualnav-transformer) (MIT).
+- Bloc de diffusion `ConditionalUnet1D`: [real-stanford/diffusion_policy](https://github.com/real-stanford/diffusion_policy) (MIT).
+- Checkpoint NoMaD: poids publiés par les auteurs (voir le repo upstream).

@@ -1,0 +1,202 @@
+"""Drive a Kachaka directly from this machine with the NoMaD policy.
+
+Pulls the Kachaka front camera over kachaka-api (gRPC), runs NoMaD locally, and
+streams base velocities back to the robot. No ROS required.
+
+Examples
+--------
+Dry-run (connects + perceives, but never moves the robot)::
+
+    python -m kachaka_navigation.scripts.run_nomad_kachaka_control --dry-run --max-iterations 20
+
+Live driving (robot WILL move; keep the area clear and a hand on the e-stop)::
+
+    python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+        --max-linear-speed 0.1 --max-angular-speed 0.3
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+from kachaka_navigation.config import PROJECT_ROOT, get_kachaka_settings
+from kachaka_navigation.logging_config import configure_logging
+from kachaka_navigation.models.nomad_original import (
+    NomadOriginalConfig,
+    NomadOriginalModel,
+)
+from kachaka_navigation.robot import NomadKachakaController, VelocityLimits
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_CHECKPOINT = PROJECT_ROOT / "models" / "nomad_original" / "checkpoints" / "nomad.pth"
+DEFAULT_CONFIG = PROJECT_ROOT / "models" / "nomad_original" / "configs" / "nomad.yaml"
+
+
+def main() -> int:
+    configure_logging()
+    args = _parse_args()
+
+    model = _build_model(args)
+    logger.info("Loading NoMaD model (device=%s)...", args.device)
+    model.load()
+
+    if args.self_test:
+        return _run_self_test(model, args)
+
+    try:
+        from kachaka_navigation.clients.kachaka_robot_client import KachakaRobotClient
+    except ImportError as error:  # pragma: no cover - env dependent
+        print(f"ERROR: kachaka-api is required: {error}", file=sys.stderr)
+        return 1
+
+    target = args.target or get_kachaka_settings().target
+    logger.info("Connecting to Kachaka at %s", target)
+    robot = KachakaRobotClient(target=target)
+
+    limits = VelocityLimits(
+        max_linear_speed=args.max_linear_speed,
+        max_angular_speed=args.max_angular_speed,
+    )
+
+    if args.dry_run:
+        logger.warning("DRY-RUN: perceiving only, robot will NOT move.")
+
+        def velocity_sink(linear: float, angular: float) -> None:
+            logger.info("[dry-run] would set velocity linear=%.3f angular=%.3f", linear, angular)
+    else:
+        logger.warning(
+            "LIVE control: enabling manual control. The robot WILL move. "
+            "Keep the area clear; press Ctrl-C to stop."
+        )
+        robot.set_manual_control_enabled(True)
+        velocity_sink = robot.set_velocity
+
+    controller = NomadKachakaController(
+        model=model,
+        camera=robot.get_front_camera_frame,
+        velocity_sink=velocity_sink,
+        limits=limits,
+        frame_rate=args.frame_rate,
+    )
+
+    max_iterations = args.max_iterations if args.max_iterations > 0 else None
+    try:
+        iterations = controller.run(max_iterations=max_iterations)
+        logger.info("NoMaD control finished after %d iterations", iterations)
+        return 0
+    except KeyboardInterrupt:
+        print()
+        logger.info("NoMaD control interrupted by user")
+        return 130
+    except Exception as error:
+        logger.exception("NoMaD control failed")
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    finally:
+        if not args.dry_run:
+            try:
+                robot.stop_velocity()
+                robot.set_manual_control_enabled(False)
+                logger.info("Stopped robot and disabled manual control.")
+            except Exception:  # pragma: no cover - best-effort cleanup
+                logger.exception("Cleanup (stop + disable manual control) failed.")
+
+
+def _run_self_test(model: NomadOriginalModel, args: argparse.Namespace) -> int:
+    """Run NoMaD on synthetic frames without a robot, to validate this PC."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from kachaka_navigation.core.messages import CommandKind, ImageFrame
+
+    logger.info("SELF-TEST: running NoMaD on synthetic frames (no robot).")
+    limits = VelocityLimits(args.max_linear_speed, args.max_angular_speed)
+    drove = False
+    for i in range(8):
+        shift = (i * 12) % 160
+        base = np.roll(np.tile(np.linspace(0, 255, 160, dtype=np.uint8), (120, 1)), shift, axis=1)
+        rgb = np.stack([base, np.roll(base, 30, 1), np.roll(base, 60, 1)], axis=-1)
+        buf = io.BytesIO()
+        Image.fromarray(rgb).save(buf, format="JPEG", quality=85)
+        frame = ImageFrame(data=buf.getvalue(), encoding="jpeg", width=160, height=120)
+        command = model.predict(frame)
+        if command.kind == CommandKind.VELOCITY:
+            v, w = limits.clamp(command.velocity.linear_x, command.velocity.angular_z)
+            drove = True
+            logger.info("  frame %2d -> linear=%+.3f m/s  angular=%+.3f rad/s", i, v, w)
+        else:
+            reason = command.metadata.get("reason", "")
+            logger.info("  frame %2d -> %s (%s)", i, command.kind.value, reason)
+    if drove:
+        logger.info("SELF-TEST OK: NoMaD produced velocity commands on this machine.")
+        return 0
+    logger.error("SELF-TEST FAILED: no velocity command produced.")
+    return 1
+
+
+def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
+    config = NomadOriginalConfig(
+        checkpoint_path=args.checkpoint,
+        model_config_path=args.config if args.config.exists() else None,
+        goal_image_path=args.goal_image,
+        device=args.device,
+        num_samples=args.num_samples,
+        num_diffusion_iters=args.num_diffusion_iters,
+        waypoint_index=args.waypoint_index,
+        max_linear_speed=args.max_linear_speed,
+        max_angular_speed=args.max_angular_speed,
+        frame_rate=args.frame_rate,
+    )
+    return NomadOriginalModel(config)
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Drive a Kachaka with the NoMaD policy (camera -> NoMaD -> velocity)."
+    )
+    parser.add_argument("--target", default=None, help="Kachaka host:port (default: from .env).")
+    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--goal-image",
+        type=Path,
+        default=None,
+        help="Optional goal image for goal-conditioned navigation (default: exploration).",
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="auto | cpu | cuda | mps (auto picks CUDA/MPS GPU if available, else CPU)",
+    )
+    parser.add_argument("--num-samples", type=int, default=8)
+    parser.add_argument("--num-diffusion-iters", type=int, default=10)
+    parser.add_argument("--waypoint-index", type=int, default=2)
+    parser.add_argument("--max-linear-speed", type=float, default=0.15, help="m/s")
+    parser.add_argument("--max-angular-speed", type=float, default=0.3, help="rad/s")
+    parser.add_argument("--frame-rate", type=float, default=3.0, help="control loop rate (Hz)")
+    parser.add_argument(
+        "--max-iterations",
+        type=int,
+        default=0,
+        help="Stop after N iterations (0 = run until Ctrl-C).",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perceive and log velocities but never move the robot.",
+    )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run NoMaD on synthetic frames without connecting to a robot.",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
