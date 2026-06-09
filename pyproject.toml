@@ -38,6 +38,7 @@ kachaka-ros2-command-sender = "kachaka_navigation.scripts.run_ros2_command_sende
 kachaka-ros2-image-sender = "kachaka_navigation.scripts.run_ros2_image_sender:main"
 kachaka-ros2-trajectory-generator = "kachaka_navigation.scripts.run_ros2_trajectory_generator:main"
 kachaka-nomad-control = "kachaka_navigation.scripts.run_nomad_kachaka_control:main"
+kachaka-capture-image = "kachaka_navigation.scripts.capture_camera_image:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

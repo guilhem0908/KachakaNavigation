@@ -42,9 +42,21 @@ class KachakaRobotClient:
         logger.info("Sending speak command")
         return self._client.speak(text)
 
-    def get_front_camera_frame(self) -> ImageFrame:
-        """Return the latest front-camera image as a (JPEG) ImageFrame."""
-        compressed = self._client.get_front_camera_ros_compressed_image()
+    def get_camera_frame(self, camera: str = "front") -> ImageFrame:
+        """Return the latest image from a Kachaka camera as an ImageFrame.
+
+        camera: "front", "back", or "tof".
+        """
+        getters = {
+            "front": self._client.get_front_camera_ros_compressed_image,
+            "back": self._client.get_back_camera_ros_compressed_image,
+            "tof": self._client.get_tof_camera_ros_compressed_image,
+        }
+        if camera not in getters:
+            raise ValueError(
+                f"Unknown camera {camera!r}. Use one of: {', '.join(getters)}"
+            )
+        compressed = getters[camera]()
         encoding = compressed.format or "jpeg"
         if "jpeg" in encoding.lower() or "jpg" in encoding.lower():
             encoding = "jpeg"
@@ -59,8 +71,12 @@ class KachakaRobotClient:
             encoding=encoding,
             frame_id=getattr(getattr(compressed, "header", None), "frame_id", "") or "",
             timestamp=timestamp,
-            metadata={"source": "kachaka_front_camera"},
+            metadata={"source": f"kachaka_{camera}_camera"},
         )
+
+    def get_front_camera_frame(self) -> ImageFrame:
+        """Return the latest front-camera image as a (JPEG) ImageFrame."""
+        return self.get_camera_frame("front")
 
     def set_manual_control_enabled(self, enable: bool) -> Any:
         logger.info("Setting Kachaka manual control: %s", enable)
