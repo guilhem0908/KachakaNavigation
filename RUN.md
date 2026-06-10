@@ -50,6 +50,23 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
     --device auto --max-linear-speed 0.1 --max-angular-speed 0.3
 ```
 
+## Prendre une photo avec la caméra du Kachaka
+
+```bash
+python -m kachaka_navigation.scripts.capture_camera_image -o photo.jpg          # caméra avant
+python -m kachaka_navigation.scripts.capture_camera_image -c back -o back.jpg   # caméra arrière (ou -c tof)
+```
+
+La photo est enregistrée en `.jpg` dans le dossier courant. Pour la **récupérer**
+sur une autre machine : `scp user@<ip>:chemin/photo.jpg .`
+
+Pour t'en servir comme **image-objectif** NoMaD (navigation ciblée) :
+
+```bash
+python -m kachaka_navigation.scripts.capture_camera_image -o models/nomad_original/goals/goal.jpg
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control --goal-image models/nomad_original/goals/goal.jpg
+```
+
 ## Options utiles
 
 | Option | Défaut | Rôle |

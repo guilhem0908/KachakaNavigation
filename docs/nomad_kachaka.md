@@ -133,6 +133,31 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
   --goal-image models/nomad_original/goals/goal.jpg
 ```
 
+## Prendre une photo avec la caméra du Kachaka
+
+Pour capturer une image (caméra avant par défaut) et l'enregistrer en `.jpg` :
+
+```bash
+python -m kachaka_navigation.scripts.capture_camera_image -o photo.jpg
+python -m kachaka_navigation.scripts.capture_camera_image -c back -o back.jpg   # ou -c tof
+```
+
+Le fichier est écrit dans le dossier courant. Pour le récupérer sur une autre
+machine : `scp user@<ip>:chemin/photo.jpg .`.
+
+C'est aussi la façon de fabriquer une **image-objectif** pour la navigation
+ciblée : on capture la destination, puis on la passe en `--goal-image`.
+
+```bash
+python -m kachaka_navigation.scripts.capture_camera_image \
+  -o models/nomad_original/goals/goal.jpg
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --goal-image models/nomad_original/goals/goal.jpg
+```
+
+Caméras disponibles : `front` (défaut), `back`, `tof`. Prérequis : robot
+joignable (`KACHAKA_HOST` correct, même réseau).
+
 ## Paramètres utiles
 
 | Option | Défaut | Rôle |
