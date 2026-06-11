@@ -184,6 +184,27 @@ Réglage si besoin, via `--goal-similarity-margin` (défaut 0.5) :
 similarité) qui se déclenche. Note : la navigation reste 100 % NoMaD — seul le
 critère d'arrêt change.
 
+### Étape 8 — Si le robot voit la cible mais part ailleurs : assist de cap
+
+Sur la caméra du Kachaka, l'encodeur de but du modèle peut être incapable de
+localiser la cible dans son champ de vision (même cause que la distance
+saturée) : le robot passe alors à côté d'un but pourtant visible. L'**assist
+de cap visuel** (activé par défaut en mode objectif) balaie l'image pour
+repérer où se trouve la photo-goal (gauche/centre/droite) et choisit, parmi
+les trajectoires proposées par NoMaD, **celle qui pointe vers elle**. NoMaD
+continue de générer tous les mouvements candidats.
+
+Les logs montrent `goal_bearing_deg=` (cap vers la photo : positif = gauche)
+et `goal_contrast=` (confiance de la localisation). L'assist ne s'active que
+quand le contraste dépasse `--goal-visible-contrast` (défaut 0.05).
+
+| Symptôme | Correctif |
+|----------|-----------|
+| Le robot se fait piéger par de faux matchs | monter `--goal-visible-contrast` (0.1) |
+| L'assist ne s'active jamais (`goal_contrast` toujours bas) | le baisser (0.03), ou photo-goal trop peu distinctive |
+| Tourne du mauvais côté | vérifier le FOV : `--camera-hfov-deg` (défaut 90) |
+| Désactiver l'assist | `--no-goal-heading-assist` |
+
 ## Options utiles
 
 | Option | Défaut | Rôle |
@@ -199,6 +220,9 @@ critère d'arrêt change.
 | `--goal-reached-distance` | 3.0 | seuil de distance prédite sous lequel = « arrivé » |
 | `--goal-similarity-threshold` | auto | seuil de similarité fixe (0-1) ; omis = auto-calibration au départ |
 | `--goal-similarity-margin` | 0.5 | auto-calibration : seuil = base + marge × (1 − base) |
+| `--no-goal-heading-assist` | — | désactive l'assist de cap visuel (actif par défaut en mode objectif) |
+| `--goal-visible-contrast` | 0.05 | confiance minimale pour que l'assist dirige vers la photo |
+| `--camera-hfov-deg` | 90 | champ de vision horizontal utilisé pour convertir position image → cap |
 | `--goal-reached-patience` | 2 | lectures consécutives positives avant arrêt |
 | `--on-goal-reached` | stop | action à l'arrivée : `stop` / `speak` / `return_home` |
 | `--goal-reached-text` | Objectif atteint | texte dit si `speak` |

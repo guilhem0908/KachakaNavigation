@@ -175,6 +175,11 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
         goal_similarity_margin=args.goal_similarity_margin,
         goal_similarity_baseline_frames=args.goal_similarity_baseline_frames,
         goal_reached_patience=args.goal_reached_patience,
+        goal_heading_assist=not args.no_goal_heading_assist,
+        camera_hfov_deg=args.camera_hfov_deg,
+        goal_visible_threshold=args.goal_visible_threshold,
+        goal_visible_contrast=args.goal_visible_contrast,
+        goal_bearing_windows=args.goal_bearing_windows,
         center_crop=not args.no_center_crop,
         waypoint_aggregation=args.waypoint_aggregation,
     )
@@ -271,6 +276,40 @@ def _parse_args() -> argparse.Namespace:
         default=5,
         help="Readings taken at the start position to build the auto-calibration "
         "baseline.",
+    )
+    parser.add_argument(
+        "--no-goal-heading-assist",
+        action="store_true",
+        help="Disable the visual heading assist (locating the goal photo in the "
+        "frame and steering the sampled trajectories toward it).",
+    )
+    parser.add_argument(
+        "--camera-hfov-deg",
+        type=float,
+        default=90.0,
+        help="Horizontal field of view of the camera, used to convert the goal "
+        "position in the image into a steering bearing.",
+    )
+    parser.add_argument(
+        "--goal-visible-threshold",
+        type=float,
+        default=None,
+        help="Fixed confidence (0-1) above which the goal counts as visible for "
+        "the heading assist. Omit for auto-calibration at the start position.",
+    )
+    parser.add_argument(
+        "--goal-visible-contrast",
+        type=float,
+        default=0.05,
+        help="Heading assist trust gate: the best window must beat the mean of "
+        "the others by this much. Raise if the robot gets steered by spurious "
+        "matches; lower if the assist never activates.",
+    )
+    parser.add_argument(
+        "--goal-bearing-windows",
+        type=int,
+        default=7,
+        help="Horizontal windows scanned to locate the goal photo in the frame.",
     )
     parser.add_argument(
         "--goal-reached-patience",

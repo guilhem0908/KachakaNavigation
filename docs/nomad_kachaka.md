@@ -167,6 +167,20 @@ fixe reste possible via `--goal-similarity-threshold`. `--arrival-detector
 any` combine distance et similarité. Les deux signaux sont toujours loggés en
 mode objectif, quel que soit le détecteur actif.
 
+### Assist de cap visuel (mode objectif)
+
+Sur une caméra éloignée des données d'entraînement, l'encodeur de but du
+modèle peut être incapable de situer la cible dans le champ de vision — le
+robot passe à côté d'un but pourtant visible (même cause racine que la
+distance saturée). L'assist de cap (activé par défaut) balaie des fenêtres
+horizontales de l'image courante, repère celle qui ressemble le plus à la
+photo-goal, en déduit un cap (`goal_bearing_deg`, positif = gauche), et
+sélectionne parmi les trajectoires échantillonnées par NoMaD celle qui pointe
+vers ce cap. La sélection ne s'applique que si la localisation est nette
+(`goal_contrast` ≥ `--goal-visible-contrast`, défaut 0.05) ; sinon le
+comportement standard (moyenne des échantillons) s'applique. Désactivation :
+`--no-goal-heading-assist`.
+
 ### Limites du goal lointain — et la bonne méthode
 
 NoMaD est une politique **courte portée** : l'image-objectif doit avoir un

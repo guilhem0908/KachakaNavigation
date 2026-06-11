@@ -106,6 +106,21 @@ class NomadOriginalConfig:
     goal_similarity_baseline_frames: int = 5
     goal_reached_patience: int = 2
 
+    # Visual heading assist (goal mode). On cameras far from the training
+    # distribution the model's goal encoder cannot localize the goal in its
+    # field of view, so it may drive past a clearly visible goal. The assist
+    # scans horizontal windows of the current frame for the best match with
+    # the goal photo and, when the match is trustworthy, picks the sampled
+    # trajectory whose heading points toward it (NoMaD still generates all
+    # candidate motions). The gate is CONTRAST-based (best window must beat
+    # the mean of the others by goal_visible_contrast) so it needs no absolute
+    # calibration; goal_visible_threshold optionally adds an absolute floor.
+    goal_heading_assist: bool = True
+    goal_bearing_windows: int = 7
+    camera_hfov_deg: float = 90.0
+    goal_visible_threshold: float | None = None
+    goal_visible_contrast: float = 0.05
+
     # Crop frames to the 4:3 training aspect ratio before the 96x96 resize
     # (no-op for 4:3 cameras; avoids distortion on wide Kachaka frames).
     center_crop: bool = True
@@ -154,6 +169,25 @@ class NomadOriginalConfig:
         if self.goal_similarity_baseline_frames < 1:
             raise ValueError(
                 "NomadOriginalConfig.goal_similarity_baseline_frames must be >= 1."
+            )
+        if self.goal_bearing_windows < 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_bearing_windows must be >= 1."
+            )
+        if not 0 < self.camera_hfov_deg <= 360:
+            raise ValueError(
+                "NomadOriginalConfig.camera_hfov_deg must be in (0, 360]."
+            )
+        if self.goal_visible_threshold is not None and not (
+            0 < self.goal_visible_threshold <= 1
+        ):
+            raise ValueError(
+                "NomadOriginalConfig.goal_visible_threshold must be in (0, 1] "
+                "or None for auto-calibration."
+            )
+        if not 0 < self.goal_visible_contrast < 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_visible_contrast must be in (0, 1)."
             )
         if self.waypoint_aggregation not in {"first", "mean"}:
             raise ValueError(
@@ -212,13 +246,13 @@ class NomadOriginalModel:
                 f"Waiting for NoMaD image context ({len(self._context)}/{needed})."
             )
 
-        linear_x, angular_z, goal_distance, goal_similarity = self._infer_velocity()
+        linear_x, angular_z, info = self._infer_velocity()
+        goal_distance = info.get("goal_distance")
+        goal_similarity = info.get("goal_similarity")
 
-        metadata: dict[str, Any] = {}
-        if goal_distance is not None:
-            metadata["goal_distance"] = round(goal_distance, 3)
-        if goal_similarity is not None:
-            metadata["goal_similarity"] = round(goal_similarity, 3)
+        metadata: dict[str, Any] = {
+            key: round(value, 3) for key, value in info.items()
+        }
 
         if metadata:  # goal mode: evaluate arrival
             cfg = self._config
@@ -295,6 +329,52 @@ class NomadOriginalModel:
             self._similarity_threshold,
         )
         return None  # applies from the next frame on
+
+    def _estimate_goal_bearing(self, pil_img: Any) -> tuple[float, float, float]:
+        """Locate the goal photo across horizontal windows of the frame.
+
+        Returns (bearing_radians, visibility, contrast). Positive bearing =
+        goal to the LEFT of center (robot-frame yaw convention). Visibility is
+        the best window's cosine similarity with the goal image; contrast is
+        how much it beats the mean of the other windows (0 when the profile is
+        flat, i.e. the goal cannot be localized laterally).
+        """
+        torch = self._torch
+        cfg = self._config
+        image_size = self._params["image_size"]
+        width, height = pil_img.size
+        window_width = min(width, int(round(height * 4.0 / 3.0)))
+        max_left = width - window_width
+        if max_left <= 0 or cfg.goal_bearing_windows == 1:
+            offsets = [max(0, max_left // 2)]
+        else:
+            count = cfg.goal_bearing_windows
+            offsets = [round(i * max_left / (count - 1)) for i in range(count)]
+
+        goal_flat = self._goal_tensor.flatten()
+        similarities: list[float] = []
+        centers: list[float] = []
+        for offset in offsets:
+            crop = pil_img.crop((offset, 0, offset + window_width, height))
+            tensor = self._transform(crop.resize((image_size[0], image_size[1])))
+            similarities.append(
+                float(
+                    torch.nn.functional.cosine_similarity(
+                        tensor.flatten(), goal_flat, dim=0
+                    ).item()
+                )
+            )
+            # Window center offset from frame center, normalized to [-1, 1].
+            centers.append((offset + window_width / 2 - width / 2) / (width / 2))
+
+        best = max(range(len(similarities)), key=similarities.__getitem__)
+        best_similarity = similarities[best]
+        others = [s for i, s in enumerate(similarities) if i != best]
+        contrast = best_similarity - (sum(others) / len(others)) if others else 0.0
+
+        # Image x grows rightward; robot yaw grows leftward -> sign flip.
+        bearing = -centers[best] * math.radians(cfg.camera_hfov_deg) / 2.0
+        return bearing, best_similarity, contrast
 
     # -- loading ------------------------------------------------------------
 
@@ -474,13 +554,14 @@ class NomadOriginalModel:
 
     # -- inference ----------------------------------------------------------
 
-    def _infer_velocity(self) -> tuple[float, float, float | None, float | None]:
+    def _infer_velocity(self) -> tuple[float, float, dict[str, float]]:
         """Run one inference step.
 
-        Returns (linear_x, angular_z, goal_distance, goal_similarity).
-        goal_distance is the model's predicted temporal distance to the goal
-        image; goal_similarity is the direct cosine similarity between the
-        current frame and the goal image. Both are None in exploration mode.
+        Returns (linear_x, angular_z, info). In goal mode, info carries
+        goal_distance (model distance head), goal_similarity (direct cosine
+        similarity with the goal photo), goal_visibility and goal_bearing_deg
+        (heading-assist localization of the goal photo in the frame). Empty
+        in exploration mode.
         """
         torch = self._torch
         params = self._params
@@ -499,15 +580,29 @@ class NomadOriginalModel:
             mask = torch.ones(1).long().to(self._device)  # ignore goal -> explore
 
         len_traj_pred = params["len_traj_pred"]
+        info: dict[str, float] = {}
         goal_distance: float | None = None
-        goal_similarity: float | None = None
+        goal_bearing: float | None = None
         if self._goal_tensor is not None:
             current = self._transform_image(self._context[-1]).to(self._device)
-            goal_similarity = float(
+            info["goal_similarity"] = float(
                 torch.nn.functional.cosine_similarity(
                     current.flatten(), self._goal_tensor.flatten(), dim=0
                 ).item()
             )
+            if cfg.goal_heading_assist:
+                bearing, visibility, contrast = self._estimate_goal_bearing(
+                    self._context[-1]
+                )
+                info["goal_visibility"] = visibility
+                info["goal_contrast"] = contrast
+                info["goal_bearing_deg"] = math.degrees(bearing)
+                trusted = contrast >= cfg.goal_visible_contrast and (
+                    cfg.goal_visible_threshold is None
+                    or visibility >= cfg.goal_visible_threshold
+                )
+                if trusted:
+                    goal_bearing = bearing
         with torch.no_grad():
             obs_cond = self._model(
                 "vision_encoder",
@@ -540,26 +635,31 @@ class NomadOriginalModel:
                     model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
 
+        np = self._np
         waypoints = self._get_action(naction)  # (num_samples, len_traj_pred, 2)
-        if cfg.waypoint_aggregation == "mean":
-            trajectory = waypoints.mean(axis=0)  # consensus across samples
+        if goal_bearing is not None:
+            # Heading assist: the goal photo was confidently located in the
+            # frame — pick the sampled trajectory pointing closest to it.
+            headings = np.arctan2(
+                waypoints[:, cfg.waypoint_index, 1],
+                waypoints[:, cfg.waypoint_index, 0],
+            )
+            best = int(np.argmin(np.abs(headings - goal_bearing)))
+            chosen = waypoints[best][cfg.waypoint_index].astype(float).copy()
+        elif cfg.waypoint_aggregation == "mean":
+            chosen = waypoints.mean(axis=0)[cfg.waypoint_index].astype(float).copy()
         else:
-            trajectory = waypoints[0]  # upstream behaviour: first sample
-        chosen = trajectory[cfg.waypoint_index].astype(float).copy()
+            chosen = waypoints[0][cfg.waypoint_index].astype(float).copy()
 
         if params["normalize"]:
             chosen *= cfg.max_linear_speed / cfg.frame_rate
 
+        if goal_distance is not None:
+            info["goal_distance"] = goal_distance
+
         v, w = self._pd_controller(float(chosen[0]), float(chosen[1]))
-        logger.debug(
-            "NoMaD waypoint=%s -> v=%.3f w=%.3f goal_distance=%s goal_similarity=%s",
-            chosen,
-            v,
-            w,
-            goal_distance,
-            goal_similarity,
-        )
-        return v, w, goal_distance, goal_similarity
+        logger.debug("NoMaD waypoint=%s -> v=%.3f w=%.3f info=%s", chosen, v, w, info)
+        return v, w, info
 
     def _get_action(self, diffusion_output: Any) -> Any:
         np = self._np

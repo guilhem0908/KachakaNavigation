@@ -129,7 +129,13 @@ class NomadKachakaController:
                     command, linear, angular = self.step()
                     extras = "".join(
                         f" {key}={command.metadata[key]}"
-                        for key in ("goal_distance", "goal_similarity")
+                        for key in (
+                            "goal_distance",
+                            "goal_similarity",
+                            "goal_visibility",
+                            "goal_contrast",
+                            "goal_bearing_deg",
+                        )
                         if command.metadata.get(key) is not None
                     )
                     logger.info(
