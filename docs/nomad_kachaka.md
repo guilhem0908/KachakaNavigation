@@ -175,11 +175,14 @@ robot passe à côté d'un but pourtant visible (même cause racine que la
 distance saturée). L'assist de cap (activé par défaut) balaie des fenêtres
 horizontales de l'image courante, repère celle qui ressemble le plus à la
 photo-goal, en déduit un cap (`goal_bearing_deg`, positif = gauche), et
-sélectionne parmi les trajectoires échantillonnées par NoMaD celle qui pointe
-vers ce cap. La sélection ne s'applique que si la localisation est nette
-(`goal_contrast` ≥ `--goal-visible-contrast`, défaut 0.05) ; sinon le
-comportement standard (moyenne des échantillons) s'applique. Désactivation :
-`--no-goal-heading-assist`.
+applique une commande angulaire proportionnelle vers ce cap. Le cap n'est
+appliqué que si la localisation est nette (`goal_contrast` ≥
+`--goal-visible-contrast`, défaut 0.05) ; il est confirmé sur
+`--goal-bearing-patience` frames, lissé (`--goal-bearing-smoothing`), et une
+zone morte (`--goal-bearing-deadband-deg`, défaut 3°) fait rouler parfaitement
+droit quand la cible est centrée — évite le zigzag. Gain angulaire :
+`--goal-steering-gain` (défaut 1.5). Sinon le comportement standard (moyenne
+des échantillons) s'applique. Désactivation : `--no-goal-heading-assist`.
 
 ### Limites du goal lointain — et la bonne méthode
 

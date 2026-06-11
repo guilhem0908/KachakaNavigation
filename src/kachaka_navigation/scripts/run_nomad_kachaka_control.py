@@ -180,6 +180,9 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
         goal_visible_threshold=args.goal_visible_threshold,
         goal_visible_contrast=args.goal_visible_contrast,
         goal_bearing_windows=args.goal_bearing_windows,
+        goal_bearing_deadband_deg=args.goal_bearing_deadband_deg,
+        goal_bearing_smoothing=args.goal_bearing_smoothing,
+        goal_steering_gain=args.goal_steering_gain,
         center_crop=not args.no_center_crop,
         waypoint_aggregation=args.waypoint_aggregation,
     )
@@ -310,6 +313,27 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=7,
         help="Horizontal windows scanned to locate the goal photo in the frame.",
+    )
+    parser.add_argument(
+        "--goal-bearing-deadband-deg",
+        type=float,
+        default=3.0,
+        help="Bearings smaller than this drive perfectly straight. Raise (5-6) "
+        "if the robot still zigzags toward a visible goal.",
+    )
+    parser.add_argument(
+        "--goal-bearing-smoothing",
+        type=float,
+        default=0.4,
+        help="EMA weight of the newest bearing measurement (lower = smoother, "
+        "slower to react).",
+    )
+    parser.add_argument(
+        "--goal-steering-gain",
+        type=float,
+        default=1.5,
+        help="Angular velocity per radian of bearing when the assist steers. "
+        "Lower it if turns feel too sharp.",
     )
     parser.add_argument(
         "--goal-reached-patience",

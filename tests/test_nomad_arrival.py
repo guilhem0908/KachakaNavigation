@@ -62,6 +62,40 @@ def test_reset_clears_auto_calibration():
     assert model._resolve_similarity_threshold(0.5) is None
 
 
+def test_bearing_filter_requires_consecutive_trusted_readings():
+    model = NomadOriginalModel(
+        _config(goal_bearing_patience=2, goal_bearing_smoothing=1.0)
+    )
+    assert model._update_bearing_filter(0.2, trusted=True) is None  # streak 1
+    assert model._update_bearing_filter(0.2, trusted=True) == pytest.approx(0.2)
+    # An untrusted reading resets the streak and the smoothing.
+    assert model._update_bearing_filter(0.2, trusted=False) is None
+    assert model._update_bearing_filter(0.2, trusted=True) is None
+
+
+def test_bearing_filter_smooths_measurements():
+    model = NomadOriginalModel(
+        _config(goal_bearing_patience=1, goal_bearing_smoothing=0.5,
+                goal_bearing_deadband_deg=0.001)
+    )
+    assert model._update_bearing_filter(0.4, trusted=True) == pytest.approx(0.4)
+    # EMA: 0.5 * 0.0 + 0.5 * 0.4 = 0.2 — a sudden flip is damped, not applied raw.
+    assert model._update_bearing_filter(0.0, trusted=True) == pytest.approx(0.2)
+
+
+def test_bearing_filter_deadband_yields_exactly_straight():
+    import math
+
+    model = NomadOriginalModel(
+        _config(goal_bearing_patience=1, goal_bearing_deadband_deg=3.0)
+    )
+    small = math.radians(2.0)
+    assert model._update_bearing_filter(small, trusted=True) == 0.0
+    model.reset()
+    large = math.radians(8.0)
+    assert model._update_bearing_filter(large, trusted=True) == pytest.approx(large)
+
+
 def test_config_validation_rejects_bad_similarity_settings():
     with pytest.raises(ValueError):
         _config(goal_similarity_threshold=1.5)
