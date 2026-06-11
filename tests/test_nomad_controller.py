@@ -192,10 +192,12 @@ def test_controller_safe_stop_is_noop_after_sink_release():
 
     controller.run(max_iterations=10)
 
-    # The pre-action safe stop goes through; the post-release finally stop
-    # must NOT reach the robot (it would re-enable manual control).
+    # Two zero velocities reach the robot before the release: the goal-reached
+    # STOP command itself and the pre-action safe stop. The finally-block stop
+    # after release must NOT reach it (it would re-enable manual control) —
+    # without the release there would be a third one.
     assert sent[-1] == (0.0, 0.0)
-    assert sent.count((0.0, 0.0)) == 1
+    assert sent.count((0.0, 0.0)) == 2
 
 
 def test_controller_rejects_non_positive_frame_rate():
