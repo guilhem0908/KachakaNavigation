@@ -83,6 +83,9 @@ class KachakaRobotClient:
         return self._client.set_manual_control_enabled(enable)
 
     def set_velocity(self, linear: float, angular: float) -> Any:
+        # Caution: kachaka-api silently re-enables manual control and retries
+        # when the send fails (e.g. manual control was turned off) — never call
+        # this after handing control back to the robot (see ReleasableVelocitySink).
         logger.debug("Setting robot velocity linear=%.3f angular=%.3f", linear, angular)
         return self._client.set_robot_velocity(linear=linear, angular=angular)
 

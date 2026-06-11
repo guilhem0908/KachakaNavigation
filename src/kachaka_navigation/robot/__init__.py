@@ -2,6 +2,7 @@ from kachaka_navigation.robot.logging_command_executor import LoggingCommandExec
 from kachaka_navigation.robot.navigation_client import RobotNavigationClient
 from kachaka_navigation.robot.nomad_controller import (
     NomadKachakaController,
+    ReleasableVelocitySink,
     VelocityLimits,
     command_to_velocity,
 )
@@ -10,6 +11,7 @@ __all__ = [
     "KachakaCommandExecutor",
     "LoggingCommandExecutor",
     "NomadKachakaController",
+    "ReleasableVelocitySink",
     "RobotNavigationClient",
     "UnsupportedRobotCommandError",
     "VelocityLimits",

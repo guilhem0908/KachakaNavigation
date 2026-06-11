@@ -23,6 +23,36 @@ CameraSource = Callable[[], ImageFrame]
 VelocitySink = Callable[[float, float], None]
 
 
+class ReleasableVelocitySink:
+    """Velocity sink that can be permanently released (then drops commands).
+
+    Needed when control is handed back to the robot mid-session (e.g.
+    return_home after reaching a goal): kachaka-api's set_robot_velocity
+    silently re-enables manual control and retries when a send fails, which
+    would cancel the running command — or drive a freshly docked robot off
+    its charger. Once released, velocity commands are dropped instead.
+    """
+
+    def __init__(self, sink: VelocitySink) -> None:
+        self._sink = sink
+        self._released = False
+
+    @property
+    def released(self) -> bool:
+        return self._released
+
+    def release(self) -> None:
+        self._released = True
+
+    def __call__(self, linear: float, angular: float) -> None:
+        if self._released:
+            logger.debug(
+                "Velocity sink released; dropping (%.3f, %.3f).", linear, angular
+            )
+            return
+        self._sink(linear, angular)
+
+
 @dataclass(frozen=True, slots=True)
 class VelocityLimits:
     max_linear_speed: float = 0.2

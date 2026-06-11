@@ -27,7 +27,11 @@ from kachaka_navigation.models.nomad_original import (
     NomadOriginalConfig,
     NomadOriginalModel,
 )
-from kachaka_navigation.robot import NomadKachakaController, VelocityLimits
+from kachaka_navigation.robot import (
+    NomadKachakaController,
+    ReleasableVelocitySink,
+    VelocityLimits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,7 @@ def main() -> int:
         max_angular_speed=args.max_angular_speed,
     )
 
+    live_sink: ReleasableVelocitySink | None = None
     if args.dry_run:
         logger.warning("DRY-RUN: perceiving only, robot will NOT move.")
 
@@ -72,7 +77,8 @@ def main() -> int:
             "Keep the area clear; press Ctrl-C to stop."
         )
         robot.set_manual_control_enabled(True)
-        velocity_sink = robot.set_velocity
+        live_sink = ReleasableVelocitySink(robot.set_velocity)
+        velocity_sink = live_sink
 
     controller = NomadKachakaController(
         model=model,
@@ -80,7 +86,7 @@ def main() -> int:
         velocity_sink=velocity_sink,
         limits=limits,
         frame_rate=args.frame_rate,
-        on_goal_reached=_build_goal_reached_action(robot, args),
+        on_goal_reached=_build_goal_reached_action(robot, args, live_sink),
     )
 
     max_iterations = args.max_iterations if args.max_iterations > 0 else None
@@ -98,12 +104,23 @@ def main() -> int:
         return 1
     finally:
         if not args.dry_run:
-            try:
-                robot.stop_velocity()
-                robot.set_manual_control_enabled(False)
-                logger.info("Stopped robot and disabled manual control.")
-            except Exception:  # pragma: no cover - best-effort cleanup
-                logger.exception("Cleanup (stop + disable manual control) failed.")
+            if live_sink is not None and live_sink.released:
+                # return_home already stopped the robot and handed control
+                # back; pushing another velocity would silently re-enable
+                # manual control (kachaka-api retry) and cancel/undock it.
+                logger.info(
+                    "Control handed back to the robot; skipping velocity cleanup."
+                )
+            else:
+                try:
+                    robot.stop_velocity()
+                except Exception:  # pragma: no cover - best-effort cleanup
+                    logger.exception("Failed to send final zero velocity.")
+                try:
+                    robot.set_manual_control_enabled(False)
+                    logger.info("Stopped robot and disabled manual control.")
+                except Exception:  # pragma: no cover - best-effort cleanup
+                    logger.exception("Failed to disable manual control.")
 
 
 def _run_self_test(model: NomadOriginalModel, args: argparse.Namespace) -> int:
@@ -160,7 +177,11 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
     return NomadOriginalModel(config)
 
 
-def _build_goal_reached_action(robot, args: argparse.Namespace):
+def _build_goal_reached_action(
+    robot,
+    args: argparse.Namespace,
+    live_sink: ReleasableVelocitySink | None,
+):
     """What to do when the model reports the goal image is reached."""
     if args.goal_image is None:
         return None
@@ -183,6 +204,8 @@ def _build_goal_reached_action(robot, args: argparse.Namespace):
         def return_home_action() -> None:
             logger.info("Goal reached — returning home.")
             robot.stop_velocity()
+            if live_sink is not None:
+                live_sink.release()  # no more velocities once control is handed back
             robot.set_manual_control_enabled(False)
             robot.return_home()
 

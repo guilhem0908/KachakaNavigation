@@ -9,6 +9,7 @@ from kachaka_navigation.core.messages import (
 )
 from kachaka_navigation.robot.nomad_controller import (
     NomadKachakaController,
+    ReleasableVelocitySink,
     VelocityLimits,
     command_to_velocity,
 )
@@ -158,6 +159,43 @@ def test_controller_goal_reached_action_failure_does_not_raise():
 
     assert iterations == 3
     assert sent[-1] == (0.0, 0.0)
+
+
+def test_releasable_sink_drops_commands_after_release():
+    sent: list[tuple[float, float]] = []
+    sink = ReleasableVelocitySink(lambda v, w: sent.append((v, w)))
+
+    sink(0.1, 0.2)
+    assert not sink.released
+    sink.release()
+    sink(0.3, 0.4)  # must be dropped, not forwarded
+
+    assert sink.released
+    assert sent == [(0.1, 0.2)]
+
+
+def test_controller_safe_stop_is_noop_after_sink_release():
+    sent: list[tuple[float, float]] = []
+    sink = ReleasableVelocitySink(lambda v, w: sent.append((v, w)))
+
+    def release_then_done() -> None:
+        sink.release()  # mimics return_home handing control back
+
+    controller = NomadKachakaController(
+        model=_GoalReachedModel(),
+        camera=_frame,
+        velocity_sink=sink,
+        frame_rate=1000.0,
+        sleep=lambda _seconds: None,
+        on_goal_reached=release_then_done,
+    )
+
+    controller.run(max_iterations=10)
+
+    # The pre-action safe stop goes through; the post-release finally stop
+    # must NOT reach the robot (it would re-enable manual control).
+    assert sent[-1] == (0.0, 0.0)
+    assert sent.count((0.0, 0.0)) == 1
 
 
 def test_controller_rejects_non_positive_frame_rate():
