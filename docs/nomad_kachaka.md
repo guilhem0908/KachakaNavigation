@@ -156,10 +156,16 @@ si le robot ne s'arrête jamais, monter le seuil à 4-6.
 approche, ex. ~15 partout — cas observé sur le Kachaka) : utiliser
 `--arrival-detector similarity`. Ce détecteur compare directement l'image
 courante à la photo-goal (similarité cosinus, 1.0 = vue identique) et ignore
-la tête de distance ; seuil via `--goal-similarity-threshold` (défaut 0.8), à
-calibrer avec les `goal_similarity=` des logs (robot sur la cible vs au
-départ). `--arrival-detector any` combine les deux signaux. Les deux valeurs
-sont toujours loggées en mode objectif, quel que soit le détecteur actif.
+la tête de distance.
+
+Par défaut le seuil **s'auto-calibre depuis la position de départ** : les
+premières lectures (`--goal-similarity-baseline-frames`, défaut 5) forment une
+base B (à quel point la vue de départ ressemble déjà à la photo), et le seuil
+devient `B + marge × (1 − B)` (`--goal-similarity-margin`, défaut 0.5). Le
+déclenchement s'adapte donc au point de départ, sans réglage manuel. Un seuil
+fixe reste possible via `--goal-similarity-threshold`. `--arrival-detector
+any` combine distance et similarité. Les deux signaux sont toujours loggés en
+mode objectif, quel que soit le détecteur actif.
 
 ### Limites du goal lointain — et la bonne méthode
 

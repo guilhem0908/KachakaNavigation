@@ -172,6 +172,8 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
         arrival_detector=args.arrival_detector,
         goal_reached_distance=args.goal_reached_distance,
         goal_similarity_threshold=args.goal_similarity_threshold,
+        goal_similarity_margin=args.goal_similarity_margin,
+        goal_similarity_baseline_frames=args.goal_similarity_baseline_frames,
         goal_reached_patience=args.goal_reached_patience,
         center_crop=not args.no_center_crop,
         waypoint_aggregation=args.waypoint_aggregation,
@@ -251,10 +253,24 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--goal-similarity-threshold",
         type=float,
-        default=0.8,
-        help="Cosine similarity (0-1) with the goal photo above which the goal "
-        "counts as reached, for --arrival-detector similarity/any. Calibrate "
-        "with the goal_similarity= values in the logs.",
+        default=None,
+        help="Fixed cosine similarity (0-1) with the goal photo above which the "
+        "goal counts as reached. Omit for AUTO-CALIBRATION: the threshold is "
+        "derived from the similarity measured at the start position.",
+    )
+    parser.add_argument(
+        "--goal-similarity-margin",
+        type=float,
+        default=0.5,
+        help="Auto-calibration margin: threshold = baseline + margin * (1 - "
+        "baseline). Lower = stops earlier, higher = must match the photo closer.",
+    )
+    parser.add_argument(
+        "--goal-similarity-baseline-frames",
+        type=int,
+        default=5,
+        help="Readings taken at the start position to build the auto-calibration "
+        "baseline.",
     )
     parser.add_argument(
         "--goal-reached-patience",

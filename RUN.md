@@ -154,27 +154,35 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
 
 Si la calibration (étape 3) donne une `goal_distance` quasi identique sur la
 cible et en approche (ex. ~15 partout), utilise la **similarité d'image
-directe** avec la photo-goal — insensible au biais du modèle :
+directe** avec la photo-goal — insensible au biais du modèle. Le seuil
+**s'auto-calibre depuis la position de départ** : les premières lectures
+mesurent à quel point la vue de départ ressemble déjà à la photo, et le seuil
+se place entre cette base et 1.0 — donc pas de réglage manuel, quel que soit
+le point de départ :
 
 ```bash
-# 1. Calibrer : robot SUR la cible, lire goal_similarity= (ex. ~0.9)
 python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
   --goal-image models/nomad_original/goals/goal.jpg \
-  --arrival-detector similarity --dry-run --max-iterations 10
-
-# 2. Robot au départ : lire la valeur en approche (ex. ~0.6) et choisir un
-#    seuil ENTRE les deux (ex. 0.8), puis lancer en réel :
-python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
-  --goal-image models/nomad_original/goals/goal.jpg \
-  --arrival-detector similarity --goal-similarity-threshold 0.8 \
+  --arrival-detector similarity \
   --goal-reached-patience 3 \
   --max-linear-speed 0.08 --max-angular-speed 0.3
 ```
 
-`goal_similarity` vaut 1.0 quand la caméra voit exactement la photo, et baisse
-avec l'écart de point de vue. S'arrête trop tôt → monter le seuil (0.85, 0.9) ;
-ne s'arrête pas → le baisser (0.75, 0.7). `--arrival-detector any` accepte le
-premier des deux signaux qui se déclenche.
+Les logs montrent `goal_similarity=` (1.0 = la caméra voit exactement la
+photo) et `goal_similarity_threshold=` (le seuil auto-calculé, affiché après
+les ~5 premières frames).
+
+Réglage si besoin, via `--goal-similarity-margin` (défaut 0.5) :
+
+| Symptôme | Correctif |
+|----------|-----------|
+| S'arrête trop tôt (en chemin) | monter la marge : `--goal-similarity-margin 0.65` |
+| Ne s'arrête pas sur la cible | baisser la marge : `--goal-similarity-margin 0.35` |
+| Je veux un seuil fixe | `--goal-similarity-threshold 0.85` (désactive l'auto) |
+
+`--arrival-detector any` accepte le premier des deux signaux (distance ou
+similarité) qui se déclenche. Note : la navigation reste 100 % NoMaD — seul le
+critère d'arrêt change.
 
 ## Options utiles
 
@@ -189,7 +197,8 @@ premier des deux signaux qui se déclenche.
 | `--goal-image <img>` | — | navigation vers une image-objectif (sinon : exploration) |
 | `--arrival-detector` | distance | signal d'arrivée : `distance` / `similarity` / `any` |
 | `--goal-reached-distance` | 3.0 | seuil de distance prédite sous lequel = « arrivé » |
-| `--goal-similarity-threshold` | 0.8 | seuil de similarité image (0-1) au-dessus duquel = « arrivé » |
+| `--goal-similarity-threshold` | auto | seuil de similarité fixe (0-1) ; omis = auto-calibration au départ |
+| `--goal-similarity-margin` | 0.5 | auto-calibration : seuil = base + marge × (1 − base) |
 | `--goal-reached-patience` | 2 | lectures consécutives positives avant arrêt |
 | `--on-goal-reached` | stop | action à l'arrivée : `stop` / `speak` / `return_home` |
 | `--goal-reached-text` | Objectif atteint | texte dit si `speak` |

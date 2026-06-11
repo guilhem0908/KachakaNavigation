@@ -93,9 +93,17 @@ class NomadOriginalConfig:
     # arrival_detector picks which signal declares arrival:
     #   "distance" | "similarity" | "any" (either one)
     # patience = consecutive positive readings required before stopping.
+    #
+    # goal_similarity_threshold=None enables AUTO-CALIBRATION: the first
+    # goal_similarity_baseline_frames readings (taken at the start position)
+    # form a baseline B, and the threshold becomes
+    # B + goal_similarity_margin * (1 - B) — so the trigger point adapts to
+    # how much the start view already resembles the goal photo.
     arrival_detector: str = "distance"
     goal_reached_distance: float = 3.0
-    goal_similarity_threshold: float = 0.8
+    goal_similarity_threshold: float | None = None
+    goal_similarity_margin: float = 0.5
+    goal_similarity_baseline_frames: int = 5
     goal_reached_patience: int = 2
 
     # Crop frames to the 4:3 training aspect ratio before the 96x96 resize
@@ -132,9 +140,20 @@ class NomadOriginalConfig:
                 "NomadOriginalConfig.arrival_detector must be 'distance', "
                 "'similarity', or 'any'."
             )
-        if not 0 < self.goal_similarity_threshold <= 1:
+        if self.goal_similarity_threshold is not None and not (
+            0 < self.goal_similarity_threshold <= 1
+        ):
             raise ValueError(
-                "NomadOriginalConfig.goal_similarity_threshold must be in (0, 1]."
+                "NomadOriginalConfig.goal_similarity_threshold must be in (0, 1] "
+                "or None for auto-calibration."
+            )
+        if not 0 < self.goal_similarity_margin < 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_similarity_margin must be in (0, 1)."
+            )
+        if self.goal_similarity_baseline_frames < 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_similarity_baseline_frames must be >= 1."
             )
         if self.waypoint_aggregation not in {"first", "mean"}:
             raise ValueError(
@@ -151,6 +170,8 @@ class NomadOriginalModel:
         self._config = config
         self._context: deque[Any] = deque(maxlen=config.context_size + 1)
         self._goal_below_count = 0
+        self._similarity_baseline: list[float] = []
+        self._similarity_threshold: float | None = None
 
         # Lazily initialized heavy state (populated by _ensure_loaded()).
         self._loaded = False
@@ -168,6 +189,8 @@ class NomadOriginalModel:
     def reset(self) -> None:
         self._context.clear()
         self._goal_below_count = 0
+        self._similarity_baseline.clear()
+        self._similarity_threshold = None
 
     def load(self) -> None:
         """Eagerly load torch + the NoMaD model. Safe to call repeatedly."""
@@ -203,9 +226,17 @@ class NomadOriginalModel:
                 goal_distance is not None
                 and goal_distance < cfg.goal_reached_distance
             )
+            similarity_threshold = (
+                self._resolve_similarity_threshold(goal_similarity)
+                if goal_similarity is not None
+                else None
+            )
+            if similarity_threshold is not None:
+                metadata["goal_similarity_threshold"] = round(similarity_threshold, 3)
             similarity_ok = (
                 goal_similarity is not None
-                and goal_similarity >= cfg.goal_similarity_threshold
+                and similarity_threshold is not None
+                and goal_similarity >= similarity_threshold
             )
             if cfg.arrival_detector == "distance":
                 arrived_now = distance_ok
@@ -234,6 +265,36 @@ class NomadOriginalModel:
             ),
             metadata=metadata,
         )
+
+    def _resolve_similarity_threshold(self, similarity: float) -> float | None:
+        """Return the similarity threshold, auto-calibrating if configured.
+
+        With a fixed config threshold, returns it directly. In auto mode, the
+        first N readings (start position) build a baseline B and the threshold
+        becomes B + margin * (1 - B). Returns None while still calibrating —
+        the similarity signal cannot declare arrival during that window.
+        """
+        cfg = self._config
+        if cfg.goal_similarity_threshold is not None:
+            return cfg.goal_similarity_threshold
+        if self._similarity_threshold is not None:
+            return self._similarity_threshold
+
+        self._similarity_baseline.append(similarity)
+        if len(self._similarity_baseline) < cfg.goal_similarity_baseline_frames:
+            return None
+        readings = sorted(self._similarity_baseline)
+        baseline = readings[len(readings) // 2]  # median
+        self._similarity_threshold = baseline + cfg.goal_similarity_margin * (
+            1.0 - baseline
+        )
+        logger.info(
+            "Auto-calibrated goal similarity from start position: "
+            "baseline=%.3f -> threshold=%.3f",
+            baseline,
+            self._similarity_threshold,
+        )
+        return None  # applies from the next frame on
 
     # -- loading ------------------------------------------------------------
 
