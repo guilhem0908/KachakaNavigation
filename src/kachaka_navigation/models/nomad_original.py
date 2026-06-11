@@ -82,11 +82,20 @@ class NomadOriginalConfig:
     frame_rate: float = 4.0  # Hz, used to scale waypoints -> velocity
     velocity_duration_seconds: float = 0.5
 
-    # Goal-arrival detection (active only when goal_image_path is set). The
-    # model's distance head predicts a temporal distance to the goal (~steps);
-    # upstream navigate.py treats < 3 as "close". patience = number of
-    # consecutive below-threshold readings required before declaring arrival.
+    # Goal-arrival detection (active only when goal_image_path is set).
+    # Two signals are computed every step and logged in the command metadata:
+    #   goal_distance   - the model's distance head (temporal distance, ~steps;
+    #                     upstream navigate.py treats < 3 as "close"). Can be
+    #                     heavily biased on cameras unlike the training data.
+    #   goal_similarity - direct cosine similarity between the current frame
+    #                     and the goal image (1.0 = identical view). Robust to
+    #                     model bias; fires when the robot sees the goal photo.
+    # arrival_detector picks which signal declares arrival:
+    #   "distance" | "similarity" | "any" (either one)
+    # patience = consecutive positive readings required before stopping.
+    arrival_detector: str = "distance"
     goal_reached_distance: float = 3.0
+    goal_similarity_threshold: float = 0.8
     goal_reached_patience: int = 2
 
     # Crop frames to the 4:3 training aspect ratio before the 96x96 resize
@@ -118,6 +127,15 @@ class NomadOriginalConfig:
             raise ValueError("NomadOriginalConfig.goal_reached_distance must not be negative.")
         if self.goal_reached_patience < 1:
             raise ValueError("NomadOriginalConfig.goal_reached_patience must be >= 1.")
+        if self.arrival_detector not in {"distance", "similarity", "any"}:
+            raise ValueError(
+                "NomadOriginalConfig.arrival_detector must be 'distance', "
+                "'similarity', or 'any'."
+            )
+        if not 0 < self.goal_similarity_threshold <= 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_similarity_threshold must be in (0, 1]."
+            )
         if self.waypoint_aggregation not in {"first", "mean"}:
             raise ValueError(
                 "NomadOriginalConfig.waypoint_aggregation must be 'first' or 'mean'."
@@ -171,26 +189,42 @@ class NomadOriginalModel:
                 f"Waiting for NoMaD image context ({len(self._context)}/{needed})."
             )
 
-        linear_x, angular_z, goal_distance = self._infer_velocity()
+        linear_x, angular_z, goal_distance, goal_similarity = self._infer_velocity()
 
+        metadata: dict[str, Any] = {}
         if goal_distance is not None:
-            if goal_distance < self._config.goal_reached_distance:
-                self._goal_below_count += 1
-            else:
-                self._goal_below_count = 0
-            if self._goal_below_count >= self._config.goal_reached_patience:
+            metadata["goal_distance"] = round(goal_distance, 3)
+        if goal_similarity is not None:
+            metadata["goal_similarity"] = round(goal_similarity, 3)
+
+        if metadata:  # goal mode: evaluate arrival
+            cfg = self._config
+            distance_ok = (
+                goal_distance is not None
+                and goal_distance < cfg.goal_reached_distance
+            )
+            similarity_ok = (
+                goal_similarity is not None
+                and goal_similarity >= cfg.goal_similarity_threshold
+            )
+            if cfg.arrival_detector == "distance":
+                arrived_now = distance_ok
+            elif cfg.arrival_detector == "similarity":
+                arrived_now = similarity_ok
+            else:  # "any"
+                arrived_now = distance_ok or similarity_ok
+
+            self._goal_below_count = self._goal_below_count + 1 if arrived_now else 0
+            if self._goal_below_count >= cfg.goal_reached_patience:
                 return NavigationCommand(
                     kind=CommandKind.STOP,
                     metadata={
                         "reason": "Goal reached",
                         "goal_reached": True,
-                        "goal_distance": round(goal_distance, 3),
+                        **metadata,
                     },
                 )
 
-        metadata: dict[str, Any] = {}
-        if goal_distance is not None:
-            metadata["goal_distance"] = round(goal_distance, 3)
         return NavigationCommand(
             kind=CommandKind.VELOCITY,
             velocity=VelocityCommand(
@@ -379,12 +413,13 @@ class NomadOriginalModel:
 
     # -- inference ----------------------------------------------------------
 
-    def _infer_velocity(self) -> tuple[float, float, float | None]:
+    def _infer_velocity(self) -> tuple[float, float, float | None, float | None]:
         """Run one inference step.
 
-        Returns (linear_x, angular_z, goal_distance). goal_distance is the
-        model's predicted temporal distance to the goal image (None when in
-        exploration mode).
+        Returns (linear_x, angular_z, goal_distance, goal_similarity).
+        goal_distance is the model's predicted temporal distance to the goal
+        image; goal_similarity is the direct cosine similarity between the
+        current frame and the goal image. Both are None in exploration mode.
         """
         torch = self._torch
         params = self._params
@@ -404,6 +439,14 @@ class NomadOriginalModel:
 
         len_traj_pred = params["len_traj_pred"]
         goal_distance: float | None = None
+        goal_similarity: float | None = None
+        if self._goal_tensor is not None:
+            current = self._transform_image(self._context[-1]).to(self._device)
+            goal_similarity = float(
+                torch.nn.functional.cosine_similarity(
+                    current.flatten(), self._goal_tensor.flatten(), dim=0
+                ).item()
+            )
         with torch.no_grad():
             obs_cond = self._model(
                 "vision_encoder",
@@ -448,13 +491,14 @@ class NomadOriginalModel:
 
         v, w = self._pd_controller(float(chosen[0]), float(chosen[1]))
         logger.debug(
-            "NoMaD waypoint=%s -> v=%.3f w=%.3f goal_distance=%s",
+            "NoMaD waypoint=%s -> v=%.3f w=%.3f goal_distance=%s goal_similarity=%s",
             chosen,
             v,
             w,
             goal_distance,
+            goal_similarity,
         )
-        return v, w, goal_distance
+        return v, w, goal_distance, goal_similarity
 
     def _get_action(self, diffusion_output: Any) -> Any:
         np = self._np

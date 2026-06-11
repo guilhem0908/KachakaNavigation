@@ -169,7 +169,9 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
         max_linear_speed=args.max_linear_speed,
         max_angular_speed=args.max_angular_speed,
         frame_rate=args.frame_rate,
+        arrival_detector=args.arrival_detector,
         goal_reached_distance=args.goal_reached_distance,
+        goal_similarity_threshold=args.goal_similarity_threshold,
         goal_reached_patience=args.goal_reached_patience,
         center_crop=not args.no_center_crop,
         waypoint_aggregation=args.waypoint_aggregation,
@@ -231,11 +233,28 @@ def _parse_args() -> argparse.Namespace:
         help="Optional goal image for goal-conditioned navigation (default: exploration).",
     )
     parser.add_argument(
+        "--arrival-detector",
+        choices=["distance", "similarity", "any"],
+        default="distance",
+        help="Signal used to detect arrival at the goal image: distance = the "
+        "model's distance head (can be unusable on out-of-domain cameras); "
+        "similarity = direct image similarity with the goal photo (robust); "
+        "any = whichever fires first.",
+    )
+    parser.add_argument(
         "--goal-reached-distance",
         type=float,
         default=3.0,
         help="Predicted temporal distance below which the goal counts as reached "
         "(upstream default 3; raise to 4-6 if the robot stops too late or never).",
+    )
+    parser.add_argument(
+        "--goal-similarity-threshold",
+        type=float,
+        default=0.8,
+        help="Cosine similarity (0-1) with the goal photo above which the goal "
+        "counts as reached, for --arrival-detector similarity/any. Calibrate "
+        "with the goal_similarity= values in the logs.",
     )
     parser.add_argument(
         "--goal-reached-patience",

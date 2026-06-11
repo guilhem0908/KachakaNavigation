@@ -152,6 +152,15 @@ sur l'objectif. La distance est en « pas de modèle » (pas en mètres) et peut
 être biaisée vers le haut par l'écart caméra Kachaka/données d'entraînement —
 si le robot ne s'arrête jamais, monter le seuil à 4-6.
 
+**Si la distance est inutilisable** (valeur quasi identique sur la cible et en
+approche, ex. ~15 partout — cas observé sur le Kachaka) : utiliser
+`--arrival-detector similarity`. Ce détecteur compare directement l'image
+courante à la photo-goal (similarité cosinus, 1.0 = vue identique) et ignore
+la tête de distance ; seuil via `--goal-similarity-threshold` (défaut 0.8), à
+calibrer avec les `goal_similarity=` des logs (robot sur la cible vs au
+départ). `--arrival-detector any` combine les deux signaux. Les deux valeurs
+sont toujours loggées en mode objectif, quel que soit le détecteur actif.
+
 ### Limites du goal lointain — et la bonne méthode
 
 NoMaD est une politique **courte portée** : l'image-objectif doit avoir un

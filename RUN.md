@@ -146,8 +146,35 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
 |----------|-----------|
 | Ne s'arrête jamais | augmenter `--goal-reached-distance` (4, 5, 6…) |
 | S'arrête trop tôt / au mauvais endroit | baisser `--goal-reached-distance`, ou augmenter `--goal-reached-patience` (3-4) |
+| `goal_distance` reste haute (~10-16) **même robot posé sur la cible** | la tête de distance est inutilisable sur cette caméra → passer au détecteur par similarité (ci-dessous) |
 | Erre, ne s'oriente pas vers la cible | cible trop loin / hors champ : rapprocher le départ, ou re-prendre `goal.jpg` depuis le point de vue d'approche |
 | Dépasse la cible avant de s'arrêter | baisser `--max-linear-speed` (0.08) |
+
+### Étape 7 — Si la distance est inutilisable : détecteur par SIMILARITÉ
+
+Si la calibration (étape 3) donne une `goal_distance` quasi identique sur la
+cible et en approche (ex. ~15 partout), utilise la **similarité d'image
+directe** avec la photo-goal — insensible au biais du modèle :
+
+```bash
+# 1. Calibrer : robot SUR la cible, lire goal_similarity= (ex. ~0.9)
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --goal-image models/nomad_original/goals/goal.jpg \
+  --arrival-detector similarity --dry-run --max-iterations 10
+
+# 2. Robot au départ : lire la valeur en approche (ex. ~0.6) et choisir un
+#    seuil ENTRE les deux (ex. 0.8), puis lancer en réel :
+python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
+  --goal-image models/nomad_original/goals/goal.jpg \
+  --arrival-detector similarity --goal-similarity-threshold 0.8 \
+  --goal-reached-patience 3 \
+  --max-linear-speed 0.08 --max-angular-speed 0.3
+```
+
+`goal_similarity` vaut 1.0 quand la caméra voit exactement la photo, et baisse
+avec l'écart de point de vue. S'arrête trop tôt → monter le seuil (0.85, 0.9) ;
+ne s'arrête pas → le baisser (0.75, 0.7). `--arrival-detector any` accepte le
+premier des deux signaux qui se déclenche.
 
 ## Options utiles
 
@@ -160,8 +187,10 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
 | `--no-center-crop` | — | désactive le recadrage 4:3 appliqué avant le resize modèle |
 | `--frame-rate` | 3 | cadence de la boucle (Hz) |
 | `--goal-image <img>` | — | navigation vers une image-objectif (sinon : exploration) |
+| `--arrival-detector` | distance | signal d'arrivée : `distance` / `similarity` / `any` |
 | `--goal-reached-distance` | 3.0 | seuil de distance prédite sous lequel = « arrivé » |
-| `--goal-reached-patience` | 2 | lectures consécutives sous le seuil avant arrêt |
+| `--goal-similarity-threshold` | 0.8 | seuil de similarité image (0-1) au-dessus duquel = « arrivé » |
+| `--goal-reached-patience` | 2 | lectures consécutives positives avant arrêt |
 | `--on-goal-reached` | stop | action à l'arrivée : `stop` / `speak` / `return_home` |
 | `--goal-reached-text` | Objectif atteint | texte dit si `speak` |
 | `--max-iterations N` | 0 | 0 = jusqu'à `Ctrl-C` |

@@ -127,16 +127,18 @@ class NomadKachakaController:
                 start = self._clock()
                 try:
                     command, linear, angular = self.step()
-                    goal_distance = command.metadata.get("goal_distance")
+                    extras = "".join(
+                        f" {key}={command.metadata[key]}"
+                        for key in ("goal_distance", "goal_similarity")
+                        if command.metadata.get(key) is not None
+                    )
                     logger.info(
                         "iter=%d kind=%s -> linear=%.3f angular=%.3f%s",
                         iterations,
                         command.kind.value,
                         linear,
                         angular,
-                        f" goal_distance={goal_distance}"
-                        if goal_distance is not None
-                        else "",
+                        extras,
                     )
                 except Exception:
                     logger.exception("NoMaD control step failed; stopping robot.")
