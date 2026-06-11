@@ -63,6 +63,7 @@ class NomadKachakaController:
         frame_rate: float = 4.0,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        on_goal_reached: Callable[[], None] | None = None,
     ) -> None:
         if frame_rate <= 0:
             raise ValueError("frame_rate must be positive.")
@@ -73,6 +74,7 @@ class NomadKachakaController:
         self._period = 1.0 / frame_rate
         self._clock = clock
         self._sleep = sleep
+        self._on_goal_reached = on_goal_reached
 
     def step(self) -> tuple[NavigationCommand, float, float]:
         """Run one perception->action cycle. Returns (command, linear, angular)."""
@@ -85,7 +87,9 @@ class NomadKachakaController:
     def run(self, max_iterations: int | None = None) -> int:
         """Run the control loop. Guarantees a zero-velocity stop on exit.
 
-        Returns the number of iterations executed.
+        Exits early when the model reports the goal image has been reached
+        (command metadata ``goal_reached``), running the ``on_goal_reached``
+        action if one was provided. Returns the number of iterations executed.
         """
         iterations = 0
         try:
@@ -93,18 +97,34 @@ class NomadKachakaController:
                 start = self._clock()
                 try:
                     command, linear, angular = self.step()
+                    goal_distance = command.metadata.get("goal_distance")
                     logger.info(
-                        "iter=%d kind=%s -> linear=%.3f angular=%.3f",
+                        "iter=%d kind=%s -> linear=%.3f angular=%.3f%s",
                         iterations,
                         command.kind.value,
                         linear,
                         angular,
+                        f" goal_distance={goal_distance}"
+                        if goal_distance is not None
+                        else "",
                     )
                 except Exception:
                     logger.exception("NoMaD control step failed; stopping robot.")
                     self._safe_stop()
                     raise
                 iterations += 1
+                if command.metadata.get("goal_reached"):
+                    logger.info(
+                        "Goal reached (predicted distance %s); stopping.",
+                        command.metadata.get("goal_distance"),
+                    )
+                    self._safe_stop()
+                    if self._on_goal_reached is not None:
+                        try:
+                            self._on_goal_reached()
+                        except Exception:
+                            logger.exception("on_goal_reached action failed.")
+                    break
                 elapsed = self._clock() - start
                 remaining = self._period - elapsed
                 if remaining > 0:

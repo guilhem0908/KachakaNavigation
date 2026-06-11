@@ -27,9 +27,11 @@ from pathlib import Path
 from typing import Any
 
 from kachaka_navigation.core.messages import (
+    CommandKind,
     ImageFrame,
     NavigationCommand,
     RobotState,
+    VelocityCommand,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,20 @@ class NomadOriginalConfig:
     frame_rate: float = 4.0  # Hz, used to scale waypoints -> velocity
     velocity_duration_seconds: float = 0.5
 
+    # Goal-arrival detection (active only when goal_image_path is set). The
+    # model's distance head predicts a temporal distance to the goal (~steps);
+    # upstream navigate.py treats < 3 as "close". patience = number of
+    # consecutive below-threshold readings required before declaring arrival.
+    goal_reached_distance: float = 3.0
+    goal_reached_patience: int = 2
+
+    # Crop frames to the 4:3 training aspect ratio before the 96x96 resize
+    # (no-op for 4:3 cameras; avoids distortion on wide Kachaka frames).
+    center_crop: bool = True
+    # How to pick the trajectory among the diffusion samples: "mean" averages
+    # all samples (stabler heading), "first" keeps upstream's sample 0.
+    waypoint_aggregation: str = "mean"
+
     # Locations of the upstream model code (vendored under third_party/ by the
     # setup script). Overridable for non-standard layouts.
     visualnav_train_path: Path = field(
@@ -98,6 +114,14 @@ class NomadOriginalConfig:
             raise ValueError("NomadOriginalConfig.num_diffusion_iters must be positive.")
         if self.max_linear_speed < 0 or self.max_angular_speed < 0:
             raise ValueError("Speed limits must not be negative.")
+        if self.goal_reached_distance < 0:
+            raise ValueError("NomadOriginalConfig.goal_reached_distance must not be negative.")
+        if self.goal_reached_patience < 1:
+            raise ValueError("NomadOriginalConfig.goal_reached_patience must be >= 1.")
+        if self.waypoint_aggregation not in {"first", "mean"}:
+            raise ValueError(
+                "NomadOriginalConfig.waypoint_aggregation must be 'first' or 'mean'."
+            )
 
 
 class NomadOriginalModel:
@@ -108,6 +132,7 @@ class NomadOriginalModel:
     def __init__(self, config: NomadOriginalConfig) -> None:
         self._config = config
         self._context: deque[Any] = deque(maxlen=config.context_size + 1)
+        self._goal_below_count = 0
 
         # Lazily initialized heavy state (populated by _ensure_loaded()).
         self._loaded = False
@@ -124,6 +149,7 @@ class NomadOriginalModel:
 
     def reset(self) -> None:
         self._context.clear()
+        self._goal_below_count = 0
 
     def load(self) -> None:
         """Eagerly load torch + the NoMaD model. Safe to call repeatedly."""
@@ -145,11 +171,34 @@ class NomadOriginalModel:
                 f"Waiting for NoMaD image context ({len(self._context)}/{needed})."
             )
 
-        linear_x, angular_z = self._infer_velocity()
-        return NavigationCommand.from_velocity(
-            linear_x=linear_x,
-            angular_z=angular_z,
-            duration_seconds=self._config.velocity_duration_seconds,
+        linear_x, angular_z, goal_distance = self._infer_velocity()
+
+        if goal_distance is not None:
+            if goal_distance < self._config.goal_reached_distance:
+                self._goal_below_count += 1
+            else:
+                self._goal_below_count = 0
+            if self._goal_below_count >= self._config.goal_reached_patience:
+                return NavigationCommand(
+                    kind=CommandKind.STOP,
+                    metadata={
+                        "reason": "Goal reached",
+                        "goal_reached": True,
+                        "goal_distance": round(goal_distance, 3),
+                    },
+                )
+
+        metadata: dict[str, Any] = {}
+        if goal_distance is not None:
+            metadata["goal_distance"] = round(goal_distance, 3)
+        return NavigationCommand(
+            kind=CommandKind.VELOCITY,
+            velocity=VelocityCommand(
+                linear_x=linear_x,
+                angular_z=angular_z,
+                duration_seconds=self._config.velocity_duration_seconds,
+            ),
+            metadata=metadata,
         )
 
     # -- loading ------------------------------------------------------------
@@ -330,7 +379,13 @@ class NomadOriginalModel:
 
     # -- inference ----------------------------------------------------------
 
-    def _infer_velocity(self) -> tuple[float, float]:
+    def _infer_velocity(self) -> tuple[float, float, float | None]:
+        """Run one inference step.
+
+        Returns (linear_x, angular_z, goal_distance). goal_distance is the
+        model's predicted temporal distance to the goal image (None when in
+        exploration mode).
+        """
         torch = self._torch
         params = self._params
         cfg = self._config
@@ -348,6 +403,7 @@ class NomadOriginalModel:
             mask = torch.ones(1).long().to(self._device)  # ignore goal -> explore
 
         len_traj_pred = params["len_traj_pred"]
+        goal_distance: float | None = None
         with torch.no_grad():
             obs_cond = self._model(
                 "vision_encoder",
@@ -355,6 +411,11 @@ class NomadOriginalModel:
                 goal_img=goal_image,
                 input_goal_mask=mask,
             )
+            if self._goal_tensor is not None:
+                # The distance head expects the goal-attended (mask=0)
+                # embedding, which is exactly obs_cond in goal mode.
+                dist_pred = self._model("dist_pred_net", obsgoal_cond=obs_cond)
+                goal_distance = float(dist_pred.flatten()[0].item())
             if obs_cond.ndim == 2:
                 obs_cond = obs_cond.repeat(cfg.num_samples, 1)
             else:
@@ -376,14 +437,24 @@ class NomadOriginalModel:
                 ).prev_sample
 
         waypoints = self._get_action(naction)  # (num_samples, len_traj_pred, 2)
-        chosen = waypoints[0][cfg.waypoint_index].astype(float).copy()
+        if cfg.waypoint_aggregation == "mean":
+            trajectory = waypoints.mean(axis=0)  # consensus across samples
+        else:
+            trajectory = waypoints[0]  # upstream behaviour: first sample
+        chosen = trajectory[cfg.waypoint_index].astype(float).copy()
 
         if params["normalize"]:
             chosen *= cfg.max_linear_speed / cfg.frame_rate
 
         v, w = self._pd_controller(float(chosen[0]), float(chosen[1]))
-        logger.debug("NoMaD waypoint=%s -> v=%.3f w=%.3f", chosen, v, w)
-        return v, w
+        logger.debug(
+            "NoMaD waypoint=%s -> v=%.3f w=%.3f goal_distance=%s",
+            chosen,
+            v,
+            w,
+            goal_distance,
+        )
+        return v, w, goal_distance
 
     def _get_action(self, diffusion_output: Any) -> Any:
         np = self._np
@@ -418,6 +489,8 @@ class NomadOriginalModel:
     def _transform_image(self, pil_img: Any) -> Any:
         torch = self._torch
         image_size = self._params["image_size"]  # width, height
+        if self._config.center_crop:
+            pil_img = _center_crop_to_aspect(pil_img, 4.0 / 3.0)
         resized = pil_img.resize((image_size[0], image_size[1]))
         tensor = self._transform(resized)
         return torch.unsqueeze(tensor, 0)
@@ -446,6 +519,21 @@ class NomadOriginalModel:
         # Fallback: let PIL sniff the format (handles most encoded buffers).
         with PILImage.open(io.BytesIO(frame.data)) as image:
             return image.convert("RGB")
+
+
+def _center_crop_to_aspect(pil_img: Any, aspect: float) -> Any:
+    """Center-crop a PIL image to the given width/height aspect ratio."""
+    width, height = pil_img.size
+    current = width / height
+    if abs(current - aspect) < 1e-3:
+        return pil_img
+    if current > aspect:  # too wide: crop the sides
+        new_width = int(round(height * aspect))
+        left = (width - new_width) // 2
+        return pil_img.crop((left, 0, left + new_width, height))
+    new_height = int(round(width / aspect))  # too tall: crop top/bottom
+    top = (height - new_height) // 2
+    return pil_img.crop((0, top, width, top + new_height))
 
 
 def _resolve_device(torch: Any, name: str) -> Any:

@@ -133,6 +133,36 @@ python -m kachaka_navigation.scripts.run_nomad_kachaka_control \
   --goal-image models/nomad_original/goals/goal.jpg
 ```
 
+### Détection d'arrivée (mode objectif)
+
+En mode objectif, la **tête de distance** de NoMaD (`dist_pred_net`) estime à
+chaque pas une distance temporelle au but. Quand elle passe sous
+`--goal-reached-distance` (défaut 3.0) pendant `--goal-reached-patience`
+lectures consécutives (défaut 2), le robot **s'arrête** et exécute l'action
+choisie :
+
+```text
+--on-goal-reached stop          s'arrête (défaut)
+--on-goal-reached speak         s'arrête + annonce (--goal-reached-text)
+--on-goal-reached return_home   s'arrête + retourne à la base
+```
+
+Réglage du seuil : observer `goal_distance=` dans les logs en plaçant le robot
+sur l'objectif. La distance est en « pas de modèle » (pas en mètres) et peut
+être biaisée vers le haut par l'écart caméra Kachaka/données d'entraînement —
+si le robot ne s'arrête jamais, monter le seuil à 4-6.
+
+### Limites du goal lointain — et la bonne méthode
+
+NoMaD est une politique **courte portée** : l'image-objectif doit avoir un
+**recouvrement visuel** avec ce que voit le robot (même pièce, quelques
+mètres, angle similaire). Une photo lointaine ou hors champ → le modèle ne
+peut pas s'orienter et erre. Pour aller loin, la méthode prévue par les
+auteurs est la **carte topologique** : une suite de photos rapprochées le
+long du trajet, enchaînées comme sous-buts (cf. `navigate.py` upstream). À
+défaut, prendre la photo-goal **depuis le point de vue du robot** (même
+hauteur, même direction d'approche) améliore beaucoup l'accroche.
+
 ## Prendre une photo avec la caméra du Kachaka
 
 Pour capturer une image (caméra avant par défaut) et l'enregistrer en `.jpg` :

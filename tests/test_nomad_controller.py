@@ -89,6 +89,77 @@ def test_controller_always_stops_on_error():
     assert sent[-1] == (0.0, 0.0)
 
 
+class _GoalReachedModel:
+    """Drives for two frames, then reports the goal image as reached."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def predict(self, frame, state=None):  # noqa: ANN001
+        self.calls += 1
+        if self.calls < 3:
+            return NavigationCommand.from_velocity(linear_x=0.1, angular_z=0.0)
+        return NavigationCommand(
+            kind=CommandKind.STOP,
+            metadata={"goal_reached": True, "goal_distance": 1.5},
+        )
+
+
+def test_controller_stops_early_and_runs_action_on_goal_reached():
+    sent: list[tuple[float, float]] = []
+    actions: list[str] = []
+    controller = NomadKachakaController(
+        model=_GoalReachedModel(),
+        camera=_frame,
+        velocity_sink=lambda v, w: sent.append((v, w)),
+        frame_rate=1000.0,
+        sleep=lambda _seconds: None,
+        on_goal_reached=lambda: actions.append("done"),
+    )
+
+    iterations = controller.run(max_iterations=10)
+
+    assert iterations == 3  # 2 driving frames + the goal-reached frame
+    assert actions == ["done"]
+    assert sent[-1] == (0.0, 0.0)
+
+
+def test_controller_goal_reached_without_action_still_stops():
+    sent: list[tuple[float, float]] = []
+    controller = NomadKachakaController(
+        model=_GoalReachedModel(),
+        camera=_frame,
+        velocity_sink=lambda v, w: sent.append((v, w)),
+        frame_rate=1000.0,
+        sleep=lambda _seconds: None,
+    )
+
+    iterations = controller.run(max_iterations=10)
+
+    assert iterations == 3
+    assert sent[-1] == (0.0, 0.0)
+
+
+def test_controller_goal_reached_action_failure_does_not_raise():
+    def boom() -> None:
+        raise RuntimeError("speaker offline")
+
+    sent: list[tuple[float, float]] = []
+    controller = NomadKachakaController(
+        model=_GoalReachedModel(),
+        camera=_frame,
+        velocity_sink=lambda v, w: sent.append((v, w)),
+        frame_rate=1000.0,
+        sleep=lambda _seconds: None,
+        on_goal_reached=boom,
+    )
+
+    iterations = controller.run(max_iterations=10)  # must not raise
+
+    assert iterations == 3
+    assert sent[-1] == (0.0, 0.0)
+
+
 def test_controller_rejects_non_positive_frame_rate():
     with pytest.raises(ValueError):
         NomadKachakaController(

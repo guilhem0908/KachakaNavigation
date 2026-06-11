@@ -80,6 +80,7 @@ def main() -> int:
         velocity_sink=velocity_sink,
         limits=limits,
         frame_rate=args.frame_rate,
+        on_goal_reached=_build_goal_reached_action(robot, args),
     )
 
     max_iterations = args.max_iterations if args.max_iterations > 0 else None
@@ -151,8 +152,46 @@ def _build_model(args: argparse.Namespace) -> NomadOriginalModel:
         max_linear_speed=args.max_linear_speed,
         max_angular_speed=args.max_angular_speed,
         frame_rate=args.frame_rate,
+        goal_reached_distance=args.goal_reached_distance,
+        goal_reached_patience=args.goal_reached_patience,
+        center_crop=not args.no_center_crop,
+        waypoint_aggregation=args.waypoint_aggregation,
     )
     return NomadOriginalModel(config)
+
+
+def _build_goal_reached_action(robot, args: argparse.Namespace):
+    """What to do when the model reports the goal image is reached."""
+    if args.goal_image is None:
+        return None
+    action = args.on_goal_reached
+
+    if args.dry_run:
+        def dry_run_action() -> None:
+            logger.info("[dry-run] goal reached — would run %r action.", action)
+
+        return dry_run_action
+
+    if action == "speak":
+        def speak_action() -> None:
+            logger.info("Goal reached — speaking.")
+            robot.speak(args.goal_reached_text)
+
+        return speak_action
+
+    if action == "return_home":
+        def return_home_action() -> None:
+            logger.info("Goal reached — returning home.")
+            robot.stop_velocity()
+            robot.set_manual_control_enabled(False)
+            robot.return_home()
+
+        return return_home_action
+
+    def stop_action() -> None:
+        logger.info("Goal reached — stopped.")
+
+    return stop_action
 
 
 def _parse_args() -> argparse.Namespace:
@@ -169,6 +208,30 @@ def _parse_args() -> argparse.Namespace:
         help="Optional goal image for goal-conditioned navigation (default: exploration).",
     )
     parser.add_argument(
+        "--goal-reached-distance",
+        type=float,
+        default=3.0,
+        help="Predicted temporal distance below which the goal counts as reached "
+        "(upstream default 3; raise to 4-6 if the robot stops too late or never).",
+    )
+    parser.add_argument(
+        "--goal-reached-patience",
+        type=int,
+        default=2,
+        help="Consecutive below-threshold readings required before stopping.",
+    )
+    parser.add_argument(
+        "--on-goal-reached",
+        choices=["stop", "speak", "return_home"],
+        default="stop",
+        help="Action when the goal image is reached: stop (default), speak, or return_home.",
+    )
+    parser.add_argument(
+        "--goal-reached-text",
+        default="Objectif atteint",
+        help="Text spoken when --on-goal-reached=speak.",
+    )
+    parser.add_argument(
         "--device",
         default="auto",
         help="auto | cpu | cuda | mps (auto picks CUDA/MPS GPU if available, else CPU)",
@@ -176,6 +239,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--num-samples", type=int, default=8)
     parser.add_argument("--num-diffusion-iters", type=int, default=10)
     parser.add_argument("--waypoint-index", type=int, default=2)
+    parser.add_argument(
+        "--waypoint-aggregation",
+        choices=["mean", "first"],
+        default="mean",
+        help="mean = average the sampled trajectories (stabler heading); "
+        "first = upstream behaviour (sample 0).",
+    )
+    parser.add_argument(
+        "--no-center-crop",
+        action="store_true",
+        help="Disable the 4:3 center-crop applied before the model resize.",
+    )
     parser.add_argument("--max-linear-speed", type=float, default=0.15, help="m/s")
     parser.add_argument("--max-angular-speed", type=float, default=0.3, help="rad/s")
     parser.add_argument("--frame-rate", type=float, default=3.0, help="control loop rate (Hz)")
