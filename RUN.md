@@ -198,12 +198,22 @@ Les logs montrent `goal_bearing_deg=` (cap vers la photo : positif = gauche)
 et `goal_contrast=` (confiance de la localisation). L'assist ne s'active que
 quand le contraste dépasse `--goal-visible-contrast` (défaut 0.05).
 
+Quand l'assist dirige, le cap est **lissé** (moyenne glissante), **confirmé sur
+2 frames**, et une **zone morte** (±3°) fait rouler parfaitement droit quand la
+cible est à peu près centrée — pas de zigzag.
+
 | Symptôme | Correctif |
 |----------|-----------|
-| Le robot se fait piéger par de faux matchs | monter `--goal-visible-contrast` (0.1) |
+| Zigzague encore vers une cible visible | monter la zone morte `--goal-bearing-deadband-deg 5`, baisser `--goal-steering-gain 1.0` |
+| Réagit trop lentement aux corrections | monter `--goal-bearing-smoothing 0.6` |
+| Le robot se fait piéger par de faux matchs (s'égare) | monter `--goal-visible-contrast` (0.1) |
 | L'assist ne s'active jamais (`goal_contrast` toujours bas) | le baisser (0.03), ou photo-goal trop peu distinctive |
 | Tourne du mauvais côté | vérifier le FOV : `--camera-hfov-deg` (défaut 90) |
 | Désactiver l'assist | `--no-goal-heading-assist` |
+
+Astuce latence : si l'inférence est lente sur ton PC (~0,5 s/pas), garde
+`--frame-rate 2` ou `3` et une vitesse basse — des commandes en retard
+amplifient les oscillations.
 
 ## Options utiles
 

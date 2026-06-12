@@ -135,6 +135,7 @@ class NomadKachakaController:
                             "goal_visibility",
                             "goal_contrast",
                             "goal_bearing_deg",
+                            "goal_bearing_applied_deg",
                         )
                         if command.metadata.get(key) is not None
                     )

@@ -121,6 +121,18 @@ class NomadOriginalConfig:
     goal_visible_threshold: float | None = None
     goal_visible_contrast: float = 0.05
 
+    # Steering stability. The raw bearing is quantized (window grid) and noisy
+    # (diffusion samples, matching jitter); applying it directly makes the
+    # robot zigzag. The applied bearing is therefore (1) confirmed over
+    # goal_bearing_patience consecutive trusted frames, (2) smoothed with an
+    # EMA (goal_bearing_smoothing = weight of the newest measurement), and
+    # (3) zeroed inside a deadband so a roughly centered goal yields a
+    # perfectly straight line. Angular command = goal_steering_gain * bearing.
+    goal_bearing_patience: int = 2
+    goal_bearing_smoothing: float = 0.4
+    goal_bearing_deadband_deg: float = 3.0
+    goal_steering_gain: float = 1.5
+
     # Crop frames to the 4:3 training aspect ratio before the 96x96 resize
     # (no-op for 4:3 cameras; avoids distortion on wide Kachaka frames).
     center_crop: bool = True
@@ -189,6 +201,22 @@ class NomadOriginalConfig:
             raise ValueError(
                 "NomadOriginalConfig.goal_visible_contrast must be in (0, 1)."
             )
+        if self.goal_bearing_patience < 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_bearing_patience must be >= 1."
+            )
+        if not 0 < self.goal_bearing_smoothing <= 1:
+            raise ValueError(
+                "NomadOriginalConfig.goal_bearing_smoothing must be in (0, 1]."
+            )
+        if self.goal_bearing_deadband_deg < 0:
+            raise ValueError(
+                "NomadOriginalConfig.goal_bearing_deadband_deg must not be negative."
+            )
+        if self.goal_steering_gain <= 0:
+            raise ValueError(
+                "NomadOriginalConfig.goal_steering_gain must be positive."
+            )
         if self.waypoint_aggregation not in {"first", "mean"}:
             raise ValueError(
                 "NomadOriginalConfig.waypoint_aggregation must be 'first' or 'mean'."
@@ -206,6 +234,8 @@ class NomadOriginalModel:
         self._goal_below_count = 0
         self._similarity_baseline: list[float] = []
         self._similarity_threshold: float | None = None
+        self._bearing_ema: float | None = None
+        self._assist_streak = 0
 
         # Lazily initialized heavy state (populated by _ensure_loaded()).
         self._loaded = False
@@ -225,6 +255,8 @@ class NomadOriginalModel:
         self._goal_below_count = 0
         self._similarity_baseline.clear()
         self._similarity_threshold = None
+        self._bearing_ema = None
+        self._assist_streak = 0
 
     def load(self) -> None:
         """Eagerly load torch + the NoMaD model. Safe to call repeatedly."""
@@ -329,6 +361,34 @@ class NomadOriginalModel:
             self._similarity_threshold,
         )
         return None  # applies from the next frame on
+
+    def _update_bearing_filter(self, bearing: float, trusted: bool) -> float | None:
+        """Stabilize the raw bearing before it may steer the robot.
+
+        Returns the bearing to apply, or None while not engaged. Requires
+        goal_bearing_patience consecutive trusted readings, smooths with an
+        EMA, and zeroes the result inside the deadband so a roughly centered
+        goal drives a straight line instead of zigzagging.
+        """
+        cfg = self._config
+        if not trusted:
+            self._assist_streak = 0
+            self._bearing_ema = None
+            return None
+
+        self._assist_streak += 1
+        alpha = cfg.goal_bearing_smoothing
+        self._bearing_ema = (
+            bearing
+            if self._bearing_ema is None
+            else alpha * bearing + (1 - alpha) * self._bearing_ema
+        )
+        if self._assist_streak < cfg.goal_bearing_patience:
+            return None
+        smoothed = self._bearing_ema
+        if abs(smoothed) < math.radians(cfg.goal_bearing_deadband_deg):
+            return 0.0
+        return smoothed
 
     def _estimate_goal_bearing(self, pil_img: Any) -> tuple[float, float, float]:
         """Locate the goal photo across horizontal windows of the frame.
@@ -601,8 +661,9 @@ class NomadOriginalModel:
                     cfg.goal_visible_threshold is None
                     or visibility >= cfg.goal_visible_threshold
                 )
-                if trusted:
-                    goal_bearing = bearing
+                goal_bearing = self._update_bearing_filter(bearing, trusted)
+                if goal_bearing is not None:
+                    info["goal_bearing_applied_deg"] = math.degrees(goal_bearing)
         with torch.no_grad():
             obs_cond = self._model(
                 "vision_encoder",
@@ -635,18 +696,8 @@ class NomadOriginalModel:
                     model_output=noise_pred, timestep=k, sample=naction
                 ).prev_sample
 
-        np = self._np
         waypoints = self._get_action(naction)  # (num_samples, len_traj_pred, 2)
-        if goal_bearing is not None:
-            # Heading assist: the goal photo was confidently located in the
-            # frame — pick the sampled trajectory pointing closest to it.
-            headings = np.arctan2(
-                waypoints[:, cfg.waypoint_index, 1],
-                waypoints[:, cfg.waypoint_index, 0],
-            )
-            best = int(np.argmin(np.abs(headings - goal_bearing)))
-            chosen = waypoints[best][cfg.waypoint_index].astype(float).copy()
-        elif cfg.waypoint_aggregation == "mean":
+        if cfg.waypoint_aggregation == "mean":
             chosen = waypoints.mean(axis=0)[cfg.waypoint_index].astype(float).copy()
         else:
             chosen = waypoints[0][cfg.waypoint_index].astype(float).copy()
@@ -658,6 +709,13 @@ class NomadOriginalModel:
             info["goal_distance"] = goal_distance
 
         v, w = self._pd_controller(float(chosen[0]), float(chosen[1]))
+        if goal_bearing is not None:
+            # Heading assist engaged: steer proportionally toward the goal
+            # photo. Inside the deadband goal_bearing is exactly 0 -> straight.
+            w = max(
+                -cfg.max_angular_speed,
+                min(cfg.goal_steering_gain * goal_bearing, cfg.max_angular_speed),
+            )
         logger.debug("NoMaD waypoint=%s -> v=%.3f w=%.3f info=%s", chosen, v, w, info)
         return v, w, info
 
